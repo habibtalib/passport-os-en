@@ -78,7 +78,7 @@ On first boot the device shows the phone setup page and starts a hotspot with no
 Source developers need ESP-IDF 5.5.3, Python 3, Git, and Linux, WSL or another environment that can run ESP-IDF:
 
 ```bash
-git clone https://github.com/habibtalib/passport-os.git
+git clone https://github.com/habibtalib/passport-os-en.git
 cd passport-os
 bash build.sh release
 ```

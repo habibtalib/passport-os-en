@@ -14,7 +14,7 @@ Community firmware for the FoloToy AI Passport · ESP32-C3 · 8 MB Flash · 10 f
 
 ---
 
-> **This is the English-only edition of Passport OS.** The device UI, web setup pages, logs, comments and documentation are all in English. The original Chinese project lives upstream at [manchunx7-bit/passport-os](https://github.com/manchunx7-bit/passport-os). This fork is [habibtalib/passport-os](https://github.com/habibtalib/passport-os).
+> **This is the English-only edition of Passport OS.** The device UI, web setup pages, logs, comments and documentation are all in English. The original Chinese project lives upstream at [manchunx7-bit/passport-os](https://github.com/manchunx7-bit/passport-os). This repo is [habibtalib/passport-os-en](https://github.com/habibtalib/passport-os-en).
 
 ## Why this project exists
 
@@ -54,7 +54,7 @@ Muse and AI Voice were previously open-sourced on their own, each with its own s
 
 ## Get started
 
-**If you only want to use the existing features, you do not need AI tools or a build environment.** When a matching release package is available, download the firmware from [GitHub Releases](https://github.com/habibtalib/passport-os/releases). To change features, see the source build steps below.
+**If you only want to use the existing features, you do not need AI tools or a build environment.** When a matching release package is available, download the firmware from [GitHub Releases](https://github.com/habibtalib/passport-os-en/releases). To change features, see the source build steps below.
 
 Supported hardware: **a FoloToy AI Passport of the same hardware revision, ESP32-C3 with 8 MB Flash.** Similar-looking boards cannot be used directly; they may have incompatible displays, audio chips, buttons or partition layouts.
 
@@ -102,7 +102,7 @@ Xiaozhi and Muse need your own service configuration; when Muse uses a proxy, en
 Prepare **Git and ESP-IDF 5.5.3** with its toolchain. On Windows you can build in WSL and flash from a Windows serial port.
 
 ```bash
-git clone https://github.com/habibtalib/passport-os.git
+git clone https://github.com/habibtalib/passport-os-en.git
 cd passport-os
 bash build.sh release
 ```
