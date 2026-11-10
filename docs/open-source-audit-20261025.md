@@ -1,97 +1,97 @@
-# Passport OS 开源整理审计报告
+# Passport OS Open-Source Preparation Audit
 
-审计日期：2026-10-25  
-审计对象：当前工作区与刚刚完整烧录到 COM3 的固件 0.2.0-rc.55  
-审计目标：确定开源包应该保留什么、排除什么，以及社区用户如何下载、烧录和首次配置。
+Audit date: 2026-10-25  
+Audited: the current workspace and firmware 0.2.0-rc.55, just fully flashed to COM3  
+Goal: decide what the open-source package should keep and exclude, and how community users download, flash and first configure it.
 
-本报告先给整理结果，不删除工作区内容，也不改变当前构建默认值。历史候选、诊断证据和临时构建目录仍保留，等维护者确认清单后再做清理。
+This report gives the preparation result first. It does not delete workspace content or change current build defaults. Historical candidates, diagnostic evidence and temporary build directories are kept until the maintainer confirms the list and cleanup is done.
 
-## 1. 当前固件身份
+## 1. Current firmware identity
 
-| 项目 | 当前值 |
+| Item | Current value |
 | --- | --- |
-| 芯片 | ESP32-C3 |
+| Chip | ESP32-C3 |
 | Flash | 8 MB |
-| 固件版本 | `0.2.0-rc.55` |
-| 当前应用镜像 | `passport-os-status-fixed.bin` |
-| 应用镜像 SHA256 | `112eb7d1cce27e2c47d60b5913f6da954120de3f549e34e02034c74679016466` |
-| 当前完整镜像 | `FoloToy-AI-Passport-full.bin` |
-| 完整镜像 SHA256 | `985ea2f3afa4cbead16933dad2624a5942c8b86c82719a1d2b789aed3231a0f9` |
+| Firmware version | `0.2.0-rc.55` |
+| Current application image | `passport-os-status-fixed.bin` |
+| Application image SHA256 | `112eb7d1cce27e2c47d60b5913f6da954120de3f549e34e02034c74679016466` |
+| Current full image | `FoloToy-AI-Passport-full.bin` |
+| Full image SHA256 | `985ea2f3afa4cbead16933dad2624a5942c8b86c82719a1d2b789aed3231a0f9` |
 | ESP-IDF | 5.5.3 |
-| 分区 | factory `0x10000 / 0x400000`，NVS `0x9000 / 0x6000`，storage `0x420000 / 0x200000` |
-| 当前构建开关 | `PASSPORT_PUBLIC_RELEASE=ON`，`PASSPORT_RADIO_HLS_TEST=OFF`，`PASSPORT_MUSE_USE_JOLLYBOT=ON` |
+| Partitions | factory `0x10000 / 0x400000`, NVS `0x9000 / 0x6000`, storage `0x420000 / 0x200000` |
+| Current build switches | `PASSPORT_PUBLIC_RELEASE=ON`, `PASSPORT_RADIO_HLS_TEST=OFF`, `PASSPORT_MUSE_USE_JOLLYBOT=ON` |
 
-完整擦除、8 MB 擦除读回、完整镜像写入和读回校验均已通过。首次启动日志确认没有旧 Wi-Fi 自动连接，开放配网热点正常启动，设备停在首次设置页。
+The full erase, the 8 MB erase read-back, the full image write and its read-back verification all passed. The first-boot log confirms no old Wi-Fi was auto-connected, the open setup hotspot started normally, and the device stopped at the first-time setup page.
 
-## 2. 当前固件实际包含的功能
+## 2. Features the current firmware actually contains
 
-这些功能在 `main/CMakeLists.txt` 中被编译，属于当前产品范围，应保留对应源代码、资源和测试：
+These features are compiled in `main/CMakeLists.txt` and are part of the current product scope; their source, assets and tests should be kept:
 
-- 首页：个人资料、头像/名片、天气、空气质量、城市目录、时钟、开放手机配网。
-- 启动器和设置：四套主题、亮度、自动熄屏、音量、按键音、无线网络、网络与时间、计时恢复。
-- 收音机：城市目录、推荐电台、MP3 播放、音量、睡眠计时和网络状态。
-- 随身语音：电脑端语音输入/快捷键桥接协议、UDP 音频、时间同步和本地设置。
-- 小智：WebSocket 语音对话、Opus 音频、OTA 配置、对话状态和 UI。
-- Muse：BLE 配对、Noise 协议、TLS/HTTP 代理路由、聊天链路和设备状态。
-- 游戏：狗游戏、俄罗斯方块、声音跳一跳；后者当前不绘制预测轨迹和落点辅助线。
-- 秒表和番茄钟：计时、后台恢复和提示音。
-- 板级支持：ESP32-C3 引脚、ST7789 显示、LVGL、ES8311 音频、ADC 三键、电池、功耗管理和 USB Serial/JTAG。
+- Home: profile, portrait/card, weather, air quality, city catalog, clock, open phone Wi-Fi setup.
+- Launcher and settings: four themes, brightness, auto screen-off, volume, key sounds, wireless network, network and time, timer recovery.
+- Radio: city catalog, recommended stations, MP3 playback, volume, sleep timer and network state.
+- AI Voice: computer-side voice input/hotkey bridge protocol, UDP audio, time sync and local settings.
+- Xiaozhi: WebSocket voice conversation, Opus audio, OTA configuration, conversation state and UI.
+- Muse: BLE pairing, Noise protocol, TLS/HTTP proxy routing, chat link and device state.
+- Games: Bark Battle, Tetris, Sound Jump; the latter currently draws no predicted trajectory or landing guide line.
+- Stopwatch and Pomodoro: timing, background recovery and alert sounds.
+- Board support: ESP32-C3 pins, ST7789 display, LVGL, ES8311 audio, ADC three-key input, battery, power management and USB Serial/JTAG.
 
-## 3. 建议的开源包结构
+## 3. Recommended open-source package structure
 
-### 必须保留
+### Must keep
 
 ```text
 .
 ├── CMakeLists.txt / build.sh / dependencies.lock / partitions.csv
-├── sdkconfig.defaults / LICENSE / README.md / README.zh_CN.md
-├── .github/                         # CI、贡献、安全和支持模板
-├── bootloader_components/bl_early/  # 当前引导阶段代码
-├── components/bsp/                  # 当前板级驱动
-├── components/esp-wifi-connect/     # 配网、DNS、站点连接和保存的 Wi-Fi
-├── components/noise_core/           # Muse Noise 协议，含 Apache-2.0 说明
-├── components/passport_muse/        # Muse 适配层，含上游许可证和 NOTICE
-├── main/                            # 当前固件的全部编译源、字体和内置资源
-├── third_party/china-cities/        # 城市目录生成所需 MIT 数据和许可证
-├── tests/                            # 主机测试、模拟器和测试桩
-├── tools/                            # 构建、验证、生成和打包脚本
-└── docs/                             # 精简后的架构、功能、发布和贡献说明
+├── sdkconfig.defaults / LICENSE / README.md
+├── .github/                         # CI, contributing, security and support templates
+├── bootloader_components/bl_early/  # current bootloader-stage code
+├── components/bsp/                  # current board drivers
+├── components/esp-wifi-connect/     # Wi-Fi setup, DNS, station connection and saved Wi-Fi
+├── components/noise_core/           # Muse Noise protocol, with Apache-2.0 notice
+├── components/passport_muse/        # Muse adaptation layer, with upstream license and NOTICE
+├── main/                            # all compiled sources, fonts and built-in assets of the current firmware
+├── third_party/china-cities/        # MIT data and license needed to generate the city catalog
+├── tests/                           # host tests, simulators and test stubs
+├── tools/                           # build, verification, generation and packaging scripts
+└── docs/                            # trimmed architecture, feature, release and contribution notes
 ```
 
-`main/apps/home/cities.json.gz`、`main/apps/radio/radio_cities.inc`、`main/fonts/city_symbols.txt` 和 `main/ui_sfx_pcm.inc` 是生成后参与编译的资源；生成脚本和源数据也必须保留。
+`main/apps/home/cities.json.gz`, `main/apps/radio/radio_cities.inc`, `main/fonts/city_symbols.txt` and `main/ui_sfx_pcm.inc` are generated resources that take part in the build; the generation scripts and source data must also be kept.
 
-### 不应进入开源源代码包
+### Should not go into the open-source source package
 
-- `build/`、`build-*`、`managed_components/`、`.cache/`、`sdkconfig`、`.elf`、`.map`、`.bin`、`.log`：机器生成或本地配置。组件由 `dependencies.lock` 和 ESP-IDF Component Manager 重新获取。
-- `release/` 下的 rc.12–rc.55 历史压缩包、旧候选目录和旧验证文件：它们不是当前源代码，容易让用户刷错版本。
-- `_diag/`、`output/`、临时预览、截图、串口私有日志和设备验证目录：保留在维护者归档，不放公开源码包。
-- `all_chars.txt`、`ui_chars.txt`、`.impeccable/`、设计过程草稿和没有被构建或测试引用的实验资源。
-- 旧 HLS 专项候选、旧版本 release notes、历史视觉审计和重复的功能说明；合并成当前文档或放入历史归档。
-- `web/phone-location.html` 当前没有被固件 CMake 或手机配网页嵌入；除非作为独立网页发布，否则排除。
+- `build/`, `build-*`, `managed_components/`, `.cache/`, `sdkconfig`, `.elf`, `.map`, `.bin`, `.log`: machine-generated or local configuration. Components are fetched again from `dependencies.lock` and the ESP-IDF Component Manager.
+- The historical rc.12-rc.55 archives, old candidate directories and old verification files under `release/`: they are not current source and make it easy for users to flash the wrong version.
+- `_diag/`, `output/`, temporary previews, screenshots, private serial logs and device verification directories: keep them in the maintainer's archive, not in the public source package.
+- `all_chars.txt`, `ui_chars.txt`, `.impeccable/`, design-process drafts and experimental assets not referenced by the build or tests.
+- Old HLS-specific candidates, old release notes, historical visual audits and duplicated feature descriptions: merge into current documents or move to a history archive.
+- `web/phone-location.html` is currently embedded neither in the firmware CMake nor in the phone setup page; exclude it unless it is published as a standalone web page.
 
-### 必须单独处理的内容
+### Must be handled separately
 
-1. **Muse 头像资产**：刚刚烧录的固件用了 `main/apps/muse/muse_avatar_frames.c` 中的 Jollybot 帧；仓库另有 `muse_avatar_public_frames.c`，说明标为 MIT 的公开几何头像。Jollybot 不是 Apache-2.0 或 MIT 资产，不能因为软件源码使用 MIT 就自动重新授权。建议公开源码默认切换到 `PASSPORT_MUSE_USE_JOLLYBOT=OFF`，发布 MIT 几何头像，并把 Jollybot 仅作为得到单独授权后的维护者构建选项。
-2. **Muse 上游代码**：`components/passport_muse/LICENSE`、`NOTICE.md` 和 `components/noise_core/NOTICE.md` 必须随源码保留；Apache-2.0 代码、Meta 上游来源、本地适配改动和个人配置默认值要分开说明。
-3. **字体与图片**：字体是编译进固件的派生资源，开源前需要保留来源、生成参数和许可证说明。建议新增统一的 `docs/THIRD-PARTY-NOTICES.md`。
-4. **网络服务**：天气、IP 城市查询、公共电台、小智服务和 Muse 代理不是本项目托管的服务，说明中应写清楚网络可用性、第三方条款和用户自行承担的账号/代理配置。
+1. **Muse avatar assets**: the firmware just flashed used the Jollybot frames in `main/apps/muse/muse_avatar_frames.c`; the repository also has `muse_avatar_public_frames.c`, documented as a public geometric avatar under MIT. Jollybot is neither an Apache-2.0 nor an MIT asset and is not relicensed just because the software source uses MIT. Recommendation: switch the public source default to `PASSPORT_MUSE_USE_JOLLYBOT=OFF`, publish the MIT geometric avatar, and keep Jollybot only as a maintainer build option once separate permission is obtained.
+2. **Muse upstream code**: `components/passport_muse/LICENSE`, `NOTICE.md` and `components/noise_core/NOTICE.md` must ship with the source; Apache-2.0 code, the Meta upstream origin, local adaptation changes and personal configuration defaults must be described separately.
+3. **Fonts and images**: fonts are derived resources compiled into the firmware, so before open-sourcing keep their origin, generation parameters and license notes. Recommendation: add a unified `docs/THIRD-PARTY-NOTICES.md`.
+4. **Network services**: weather, IP city lookup, public radio, the Xiaozhi service and the Muse proxy are not hosted by this project; the docs should state network availability, third-party terms, and the account/proxy configuration users take responsibility for.
 
-## 4. 发布前需要修正的问题
+## 4. Issues to fix before release
 
-- `PASSPORT_MUSE_USE_JOLLYBOT` 默认值和公开构建路径目前都是 `ON`，与公开头像说明存在边界冲突。
-- `dependencies.lock` 被 `.gitignore` 忽略，但它是可复现构建的重要输入；正式仓库应取消忽略并提交它。
-- 当前工作区包含大量未提交改动和未跟踪文件，不能直接以当前 Git HEAD 作为 release 来源。
-- 版本号仍为 `0.2.0-rc.55`。正式社区开源版建议单独递增版本号，并让源码、固件、发布说明和 SHA256 清单一致。
-- `tools/package_firmware.py` 已有源码快照和逐文件哈希能力，但必须在清理完成后再打包，不能复用历史 release ZIP。
+- The default of `PASSPORT_MUSE_USE_JOLLYBOT` and the public build path are both currently `ON`, which conflicts with the public avatar notes.
+- `dependencies.lock` is ignored by `.gitignore` but is an important input for reproducible builds; the official repository should stop ignoring it and commit it.
+- The current workspace contains many uncommitted changes and untracked files, so the current Git HEAD cannot be used directly as the release source.
+- The version is still `0.2.0-rc.55`. A formal community open-source release should bump the version separately, keeping source, firmware, release notes and the SHA256 list consistent.
+- `tools/package_firmware.py` already has source snapshot and per-file hash capability, but packaging must happen after cleanup; do not reuse historical release ZIPs.
 
-## 5. 推荐的社区安装路径
+## 5. Recommended community install path
 
-普通用户不需要安装 AI，也不需要先安装 ESP-IDF：下载匹配硬件的 `*-full.bin`，验证 SHA256，写入 `0x0`，首次启动连接 `Passport-WiFi-xxxx` 开放热点，在 `http://192.168.4.1` 完成配网。普通升级使用同一分区表确认过的 `*-app.bin` 写入 `0x10000`。
+Ordinary users need neither AI nor ESP-IDF: download the `*-full.bin` matching the hardware, verify the SHA256, write it at `0x0`, connect to the open `Passport-WiFi-xxxx` hotspot on first boot, and finish Wi-Fi setup at `http://192.168.4.1`. A normal upgrade writes the `*-app.bin` confirmed against the same partition table at `0x10000`.
 
-源码开发者再安装 ESP-IDF 5.5.3，执行 `bash build.sh release` 或 `./tools/validate.sh --firmware`。构建脚本会重新生成 `managed_components`，并验证分区、应用大小、SRAM 和公开默认配置。
+Source developers then install ESP-IDF 5.5.3 and run `bash build.sh release` or `./tools/validate.sh --firmware`. The build script regenerates `managed_components` and verifies partitions, app size, SRAM and public default configuration.
 
-## 6. 审计结论
+## 6. Audit conclusion
 
-当前项目具备开源所需的源代码、构建脚本、测试和许可证基础；问题集中在历史内容太多，以及 Muse 头像发布边界。建议先生成干净公开分支，默认使用 MIT 几何头像，保留完整功能源代码和必要测试，再确认是否发布 Jollybot 资产。
+The project has the source, build scripts, tests and license basis needed for open sourcing; the problems are too much historical content and the Muse avatar release boundary. Recommendation: first produce a clean public branch, use the MIT geometric avatar by default, keep the complete feature source and necessary tests, then decide whether to publish the Jollybot assets.
 
-本报告没有执行删除、改默认值或重新发布操作。
+This report did not delete anything, change defaults or republish.

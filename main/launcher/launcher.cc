@@ -21,12 +21,12 @@ namespace {
 
 constexpr size_t kIconParts = 10;
 
-// 旅行仪器配色:与首页(app_home.cc)完全同源,风格统一。
-#define kBg (UI_BG)          // 屏底炭黑
-#define kCardBg (UI_SURFACE)      // 卡片底
-#define kPhos (UI_ACCENT)        // 琥珀:图标/标题/选中态
-#define kPhosDim (UI_TEXT_DIM)     // 灰米色:副标题/未选中
-#define kPhosBorder (UI_BORDER)  // 卡片/底板描边
+// Travel-gauge palette: exactly the same source as Home (app_home.cc), keeping a unified style.
+#define kBg (UI_BG)          // screen background, charcoal
+#define kCardBg (UI_SURFACE)      // card background
+#define kPhos (UI_ACCENT)        // amber: icon/title/selected state
+#define kPhosDim (UI_TEXT_DIM)     // gray-beige: subtitle/unselected
+#define kPhosBorder (UI_BORDER)  // card/baseplate outline
 #define kStatus (ui_theme_is_multicolor() ? UI_TEXT : kPhos)
 
 lv_obj_t *s_screen;
@@ -71,22 +71,22 @@ void draw_neighbour_chevron(lv_event_t *event) {
 }
 
 const char *app_chinese_name(passport_app_id_t id) {
-    // 2026-09-13 修复(D1):名称原本在 launcher 里硬编码一份、在 passport_app_t
-    // 里又各写一份,两边悄悄跑偏(注册表"城市收音机" vs 抽屉"收音机",
-    // "随身 AI 语音" vs "AI语音")。改成**以注册表为唯一来源**,只有没注册进
-    // 注册表的内置页(配网/设置)才走兜底表。
+    // 2026-09-13 fix (D1): names used to be hardcoded once in the launcher and once more in passport_app_t,
+    // and the two silently drifted apart (registry "City Radio" vs drawer "Radio",
+    // "Portable AI Voice" vs "AI Voice"). Now **the registry is the single source**; only built-in pages not registered
+    // in the registry (Wi-Fi/Settings) use the fallback table.
     const passport_app_t *app = app_registry_get_by_id(id);
     if (app != nullptr && app->name != nullptr && app->name[0] != '\0') {
         return app->name;
     }
     switch (id) {
-        case APP_ID_WIFI: return "无线网络";
-        case APP_ID_SETTINGS: return "设置";
+        case APP_ID_WIFI: return "Wi-Fi";
+        case APP_ID_SETTINGS: return "Settings";
         default: return "";
     }
 }
 
-// 像素块:方角(至多 1px 圆角),保证所有图标是同一套"积木"语言
+// Pixel blocks: square corners (at most 1px radius), keeping all icons in one "building block" language
 void set_part(size_t index, int x, int y, int w, int h, uint32_t color) {
     if (index >= kIconParts) return;
     lv_obj_t *part = s_icon_parts[index];
@@ -99,7 +99,7 @@ void set_part(size_t index, int x, int y, int w, int h, uint32_t color) {
     lv_obj_set_style_bg_opa(part, LV_OPA_COVER, 0);
 }
 
-// 描边块:纸底 + 墨边,用于图标里的"空心"结构(机身/屏幕)
+// Outline block: paper fill + ink edge, for "hollow" structures in icons (body/screen)
 void set_frame(size_t index, int x, int y, int w, int h, uint32_t color,
                int border) {
     if (index >= kIconParts) return;
@@ -145,43 +145,43 @@ void draw_app_icon(passport_app_id_t id, uint32_t color) {
 
     switch (id) {
         case APP_ID_HOME:
-            // 小房子:阶梯屋顶 + 描边屋身 + 门 + 窗
+            // Little house: stepped roof + outlined body + door + window
             set_part(0, 14, 30, 60, 8, color);
             set_part(1, 22, 22, 44, 8, color);
             set_part(2, 32, 14, 24, 8, color);
             set_frame(3, 20, 38, 48, 34, color, 4);
-            set_part(4, 40, 50, 10, 22, color);   // 门
-            set_part(5, 26, 44, 8, 8, color);     // 窗
+            set_part(4, 40, 50, 10, 22, color);   // door
+            set_part(5, 26, 44, 8, 8, color);     // window
             break;
         case APP_ID_RADIO:
-            // 收音机:机身 + 喇叭点阵 + 刻度窗 + 天线
+            // Radio: body + speaker dot matrix + dial window + antenna
             set_frame(0, 10, 26, 68, 46, color, 4);
-            set_part(1, 18, 34, 24, 14, detail);   // 喇叭
+            set_part(1, 18, 34, 24, 14, detail);   // speaker
             set_part(2, 18, 54, 24, 4, color);
             set_part(3, 18, 62, 24, 4, color);
-            set_part(4, 50, 34, 20, 8, color);    // 刻度窗
+            set_part(4, 50, 34, 20, 8, color);    // dial window
             set_part(5, 50, 48, 20, 4, color);
-            set_part(6, 24, 14, 40, 4, detail);    // 天线
-            set_part(7, 60, 10, 8, 8, color);     // 天线头
+            set_part(6, 24, 14, 40, 4, detail);    // antenna
+            set_part(7, 60, 10, 8, 8, color);     // antenna tip
             break;
         case APP_ID_VOICE:
-            // 麦克风:拾音头 + 支架 + 底座
+            // Microphone: pickup head + stand + base
             set_frame(0, 30, 8, 28, 44, color, 4);
-            set_part(1, 20, 34, 6, 16, color);    // 左弧
-            set_part(2, 62, 34, 6, 16, color);    // 右弧
-            set_part(3, 20, 50, 48, 6, color);    // 底弧
-            set_part(4, 41, 56, 6, 12, color);    // 立杆
-            set_part(5, 28, 68, 32, 6, color);    // 底座
+            set_part(1, 20, 34, 6, 16, color);    // left arc
+            set_part(2, 62, 34, 6, 16, color);    // right arc
+            set_part(3, 20, 50, 48, 6, color);    // bottom arc
+            set_part(4, 41, 56, 6, 12, color);    // pole
+            set_part(5, 28, 68, 32, 6, color);    // base
             break;
         case APP_ID_XIAOZHI:
-            // 机器人头(吉祥物同族):头 + 大眼 + 天线 + 围巾
+            // Robot head (same family as the mascot): head + big eyes + antenna + scarf
             set_frame(0, 16, 18, 56, 44, color, 4);
-            set_part(1, 28, 30, 8, 12, color);    // 左眼
-            set_part(2, 52, 30, 8, 12, color);    // 右眼
-            set_part(3, 38, 50, 12, 4, color);    // 嘴
-            set_part(4, 42, 8, 4, 10, detail);     // 天线
-            set_part(5, 38, 4, 12, 6, detail);      // 天线头
-            set_part(6, 26, 64, 36, 6, warm);     // 围巾
+            set_part(1, 28, 30, 8, 12, color);    // left eye
+            set_part(2, 52, 30, 8, 12, color);    // right eye
+            set_part(3, 38, 50, 12, 4, color);    // mouth
+            set_part(4, 42, 8, 4, 10, detail);     // antenna
+            set_part(5, 38, 4, 12, 6, detail);      // antenna tip
+            set_part(6, 26, 64, 36, 6, warm);     // scarf
             break;
         case APP_ID_MUSE:
                 set_frame(0, 18, 18, 52, 46, color, 4);
@@ -192,14 +192,14 @@ void draw_app_icon(passport_app_id_t id, uint32_t color) {
                 set_part(5, 74, 34, 8, 20, color);
                 break;
         case APP_ID_WIFI:
-            // 信号塔:四级阶梯(与其它图标的"方块"语言一致)
+            // Signal tower: four-step staircase (consistent with the "block" language of other icons)
             set_part(0, 14, 56, 12, 18, color);
             set_part(1, 32, 44, 12, 30, color);
             set_part(2, 50, 30, 12, 44, color);
             set_part(3, 68, 16, 12, 58, color);
             break;
         case APP_ID_SETTINGS:
-            // 滑块三行:横轨 + 错位方块钮
+            // Slider, three rows: horizontal track + offset square knob
             set_part(0, 14, 20, 60, 6, color);
             set_part(1, 14, 41, 60, 6, detail);
             set_part(2, 14, 62, 60, 6, warm);
@@ -208,14 +208,14 @@ void draw_app_icon(passport_app_id_t id, uint32_t color) {
             set_part(5, 22, 56, 16, 18, warm);
             break;
         case APP_ID_GAME:
-            // 你在狗叫什么: 像素狗头(柴犬大脸 + 双折耳 + 眼鼻 + 汪汪大嘴)
-            set_frame(0, 16, 26, 52, 38, color, 4);   // 狗脸主体
-            set_part(1, 10, 18, 14, 16, color);       // 左耳
-            set_part(2, 60, 18, 14, 16, color);       // 右耳
-            set_part(3, 26, 36, 8, 8, color);         // 左眼
-            set_part(4, 50, 36, 8, 8, color);         // 右眼
-            set_part(5, 38, 44, 8, 6, color);         // 黑鼻头
-            set_part(6, 32, 54, 20, 8, color);        // 汪汪张开的大嘴
+            // Bark Battle: pixel dog head (big Shiba face + two folded ears + eyes and nose + wide-open barking mouth)
+            set_frame(0, 16, 26, 52, 38, color, 4);   // dog face body
+            set_part(1, 10, 18, 14, 16, color);       // left ear
+            set_part(2, 60, 18, 14, 16, color);       // right ear
+            set_part(3, 26, 36, 8, 8, color);         // left eye
+            set_part(4, 50, 36, 8, 8, color);         // right eye
+            set_part(5, 38, 44, 8, 6, color);         // black nose
+            set_part(6, 32, 54, 20, 8, color);        // wide-open barking mouth
             break;
         case APP_ID_SOUND_JUMP:
             // Same four-legged Claude silhouette as the game, matching theme in launcher.
@@ -251,17 +251,17 @@ void draw_app_icon(passport_app_id_t id, uint32_t color) {
             set_part(9, 42, 60, 4, 4, color);
             break;
         case APP_ID_TETRIS:
-            // 俄罗斯方块:T/L/方 三种积木错落
-            set_frame(0, 12, 14, 30, 10, color, 3);   // T 横条
-            set_part(1, 22, 24, 10, 10, color);       // T 竖
-            set_part(2, 12, 44, 10, 10, color);       // L 竖
+            // Tetris: T/L/square blocks staggered
+            set_frame(0, 12, 14, 30, 10, color, 3);   // T bar
+            set_part(1, 22, 24, 10, 10, color);       // T stem
+            set_part(2, 12, 44, 10, 10, color);       // L stem
             set_part(3, 12, 54, 10, 10, color);
             set_part(4, 22, 54, 10, 10, color);
-            set_part(5, 48, 24, 10, 10, color);       // O 方块
+            set_part(5, 48, 24, 10, 10, color);       // O block
             set_part(6, 58, 24, 10, 10, color);
             set_part(7, 48, 34, 10, 10, color);
             set_part(8, 58, 34, 10, 10, color);
-            set_part(9, 40, 58, 38, 10, color);       // I 长条
+            set_part(9, 40, 58, 38, 10, color);       // I bar
             break;
         default:
             break;
@@ -332,18 +332,18 @@ void launcher_ui_init(void) {
 
     s_screen = lv_obj_create(nullptr);
     lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
-    // 与首页一致的绿磷光底(不再用天空/云/草地的像素风背景)
+    // Green-phosphor background consistent with Home (no more sky/cloud/grass pixel-style background)
     lv_obj_set_style_bg_color(s_screen, lv_color_hex(kBg), 0);
     lv_obj_set_style_border_width(s_screen, 0, 0);
     lv_obj_set_style_pad_all(s_screen, 0, 0);
 
-    // ---- 状态栏 (y0..24):与首页同款 —— 炭灰条 + 共享 Wi-Fi 格 + 电池 ----
+    // ---- Status bar (y0..24): same style as Home - charcoal bar + shared Wi-Fi bars + battery ----
     ui_pixel_top_bar(s_screen);
     ui_pixel_wifi_bars_create(s_screen, 12, 18, s_wifi_bars);
     s_battery = ui_pixel_battery_create(s_screen, 206, 6, kStatus,
                                         &lv_font_montserrat_14);
 
-    lv_obj_t *catalogue = ui_pixel_label(s_screen, "应用", &buddy_font_16, UI_TEXT);
+    lv_obj_t *catalogue = ui_pixel_label(s_screen, "Apps", &buddy_font_16, UI_TEXT);
     ui_pixel_status_text_align(catalogue, 42, 40, LV_TEXT_ALIGN_LEFT);
     s_clock = ui_pixel_label(s_screen, "--:--", &lv_font_montserrat_14, UI_TEXT);
     ui_pixel_status_text_align(s_clock, 92, 56, LV_TEXT_ALIGN_CENTER);
@@ -381,7 +381,7 @@ void launcher_ui_init(void) {
     lv_label_set_long_mode(s_app_title, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(s_app_title, LV_TEXT_ALIGN_CENTER, 0);
 
-    ui_pixel_footer(s_screen, "上下选择 · 确定打开", "长按确定返回首页", &buddy_font_16);
+    ui_pixel_footer(s_screen, "Up/Down select · OK open", "Hold OK: Home", &buddy_font_16);
 
     update_card_content();
     launcher_ui_update_status();
@@ -403,8 +403,8 @@ void launcher_ui_show(void) {
 }
 
 void launcher_ui_hide(void) {
-    // Launcher 不与重型 App 同时常驻。Radio 的音频驱动和复杂 UI 会把单核
-    // C3 的内部堆推到极限，进入 App 前释放主页可避免 LVGL 分配失败崩溃。
+    // The Launcher does not stay resident together with heavy Apps. Radio audio drivers and complex UI push the single-core
+    // C3 internal heap to the limit; releasing the home page before entering an App avoids LVGL allocation failure crashes.
     bsp_lvgl_lock(-1);
     if (s_screen) lv_obj_delete(s_screen);
     s_screen = nullptr;

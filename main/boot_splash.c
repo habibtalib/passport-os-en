@@ -1,6 +1,6 @@
-// main/boot_splash.c —— 开机动画:黑底磷光绿。
-//   "PASSPORT OS" 打字机式出现 + 尾部光标闪烁,下方 14 格绿点进度条逐格点亮。
-//   总时长 ~0.9s,与开机音(chime)同时发生,声画同步。
+// main/boot_splash.c - boot animation: black background, phosphor green.
+// "PASSPORT OS" appears typewriter-style + blinking cursor at the end, with a 14-cell green-dot progress bar lighting up below.
+// Total about 0.9s, concurrent with the boot chime, audio and video in sync.
 #include "boot_splash.h"
 #include "ui_palette.h"
 
@@ -16,14 +16,14 @@
 
 static const char *TAG = "boot_splash";
 
-// 与首页同源的磷光配色
+// Phosphor palette shared with Home
 #define C_BG      UI_BG
 #define C_PHOS    UI_ACCENT
 #define C_PHOSDIM UI_TEXT_DIM
 #define C_BORDER  UI_BORDER
 
 #define BAR_N     14
-#define STEP_MS   62          // 14 格 × 62ms ≈ 0.87s
+#define STEP_MS   62          // 14 cells x 62ms = about 0.87s
 
 static lv_obj_t *s_splash;
 
@@ -42,7 +42,7 @@ static lv_obj_t *blk(lv_obj_t *parent, int x, int y, int w, int h, uint32_t colo
 void boot_splash_run(void) {
     bsp_lvgl_lock(-1);
 
-    // 确保此前任何在飞的 SPI DMA 事务完全落地
+    // Make sure any in-flight SPI DMA transactions have fully landed
     esp_lcd_panel_io_handle_t io = bsp_display_io();
     if (io) {
         esp_lcd_panel_io_tx_param(io, 0x00, NULL, 0);
@@ -58,8 +58,8 @@ void boot_splash_run(void) {
     lv_obj_set_style_shadow_width(s_splash, 0, 0);
     lv_obj_set_style_pad_all(s_splash, 0, 0);
 
-    // 主标题:PASSPORT OS(打字机由"光标块"配合实现 —— 文本先整段放好,
-    // 用一块与底色同色的遮罩盖住,随节拍右移露出,等效打字且不重排文本)
+    // Main title: PASSPORT OS (typewriter is done with a "cursor block": the whole text is placed first,
+    // covered by a mask in the background color that moves right with each beat, equivalent to typing without reflowing the text)
     lv_obj_t *title = lv_label_create(s_splash);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(C_PHOS), 0);
@@ -67,7 +67,7 @@ void boot_splash_run(void) {
     lv_label_set_text(title, "PASSPORT OS");
     lv_obj_align(title, LV_ALIGN_CENTER, 0, -26);
 
-    // 副标题
+    // Subtitle
     lv_obj_t *sub = lv_label_create(s_splash);
     lv_obj_set_style_text_font(sub, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(sub, lv_color_hex(C_PHOSDIM), 0);
@@ -97,24 +97,24 @@ void boot_splash_run(void) {
 
     lv_screen_load(s_splash);
 
-    // 在全程持锁保护下，同步将 320 行（27 块）完整首帧推到 ST7789
-    // 不经中途解锁，彻底杜绝 taskLVGL 与直写 DMA 冲突导致的顶部红线/错位
+    // Under the full lock, synchronously push the complete first frame of 320 rows (27 blocks) to the ST7789
+    // without unlocking midway, completely avoiding the top red line / misalignment caused by taskLVGL conflicting with direct-write DMA
     const int64_t t0 = esp_timer_get_time();
     lv_refr_now(lv_display_get_default());
     if (io) {
-        esp_lcd_panel_io_tx_param(io, 0x00, NULL, 0); // 阻塞等待最后一块 DMA 落地
+        esp_lcd_panel_io_tx_param(io, 0x00, NULL, 0); // block until the last DMA chunk has landed
     }
     const int64_t t1 = esp_timer_get_time();
     ESP_LOGI(TAG, "first frame synced: refr=%lldms", (long long)((t1 - t0) / 1000));
     bsp_lvgl_unlock();
 
-    // 首帧完全落地后再渐亮背光（140ms，CRT 上电质感，无白闪亦无红线）
+    // Fade the backlight up only after the first frame has fully landed (140ms, CRT power-on feel, no white flash and no red line)
     for (int b = 0; b <= 100; b += 10) {
         bsp_display_backlight(b);
         vTaskDelay(pdMS_TO_TICKS(14));
     }
 
-    // 节拍:光标在标题宽度(约 150px)内随进度右移,格点同步点亮
+    // Beat: the cursor moves right across the title width (about 150px) with progress, dots light up in sync
     for (int i = 0; i < BAR_N; ++i) {
         vTaskDelay(pdMS_TO_TICKS(STEP_MS));
         if (!bsp_lvgl_lock(200)) continue;
@@ -127,7 +127,7 @@ void boot_splash_run(void) {
             lv_obj_add_flag(mask, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(cursor, LV_OBJ_FLAG_HIDDEN);
         }
-        // 光标闪烁:偶数格半透明
+        // Cursor blink: semi-transparent on even cells
         lv_obj_set_style_opa(cursor, (i % 2) ? LV_OPA_40 : LV_OPA_COVER, 0);
         bsp_lvgl_unlock();
     }

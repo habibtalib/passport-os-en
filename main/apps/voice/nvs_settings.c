@@ -1,4 +1,4 @@
-// main/apps/voice/nvs_settings.c —— 设置存储实现。
+// main/apps/voice/nvs_settings.c -- settings storage implementation.
 #include "nvs_settings.h"
 #include "esp_log.h"
 #include "nvs.h"
@@ -72,6 +72,6 @@ void nvs_settings_factory_reset(void) {
         nvs_erase_all(h);
         nvs_commit(h);
         nvs_close(h);
-        ESP_LOGW(TAG, "app 命名空间已清空");
+        ESP_LOGW(TAG, "app namespace cleared");
     }
 }

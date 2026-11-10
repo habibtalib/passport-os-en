@@ -34,6 +34,5 @@ jobs:
       - name: Sync check
         if: failure()
         run: |
-          echo "[Error] 由于上游仓库的 workflow 文件变更，GitHub 可能暂停本次自动更新。请手动 Sync Fork，详见 docs/development/CI-sync-main.md。"
           echo "[Error] An upstream workflow change may have paused automatic synchronization. Sync the fork manually; see docs/development/CI-sync-main.md."
           exit 1

@@ -1,6 +1,6 @@
-// 首页天气:Open-Meteo(免 API Key)当前温度+WMO 天气码,映射为中文短语。
-// 坐标由上传网页在浏览器端完成地理编码后写入资料,设备端只发一次小请求。
-// 上次成功结果缓存到 NVS,无网开机也能显示最近一次天气。
+// Home weather: Open-Meteo (no API key) current temperature + WMO weather code, mapped to short English phrases.
+// Coordinates are geocoded in the browser by the upload page and stored in the profile; the device only makes one small request.
+// The last successful result is cached in NVS, so the latest weather shows even when booting offline.
 #pragma once
 
 #include <stdbool.h>
@@ -15,12 +15,12 @@ extern "C" {
 
 typedef struct {
     bool valid;
-    int16_t temp_c;    /* 四舍五入后的摄氏度 */
+    int16_t temp_c;    /* Celsius, rounded */
     uint16_t code;     /* WMO weather code */
-    uint8_t humidity;  /* 相对湿度 % */
-    uint8_t wind_kmh;  /* 10 米风速 km/h(取整) */
-    uint16_t wind_dir; /* 10 米风向,度(0=北,顺时针) */
-    uint32_t updated_at; /* 拉取成功时的 UTC 秒;0 = 未知(当时未校时) */
+    uint8_t humidity;  /* Relative humidity % */
+    uint8_t wind_kmh;  /* 10 m wind speed km/h (rounded) */
+    uint16_t wind_dir; /* 10 m wind direction, degrees (0=north, clockwise) */
+    uint32_t updated_at; /* UTC seconds of the successful fetch; 0 = unknown (clock was unsynced) */
 } home_weather_t;
 
 // Open-Meteo/CAMS model concentration, not a Chinese AQI or indoor measurement.
@@ -38,28 +38,28 @@ void home_air_quality_label(bool connected, char *out, size_t capacity);
 void home_weather_allow_requests(void);
 void home_weather_cancel_requests(void);
 
-// 读 NVS 缓存。UI 立即有"上次天气"可显示。
+// Read the NVS cache. The UI immediately has a "last weather" to show.
 void home_weather_init(void);
 
 bool home_weather_get(home_weather_t *out);
 
-// WMO 码 → 中文短语(全部在 buddy 字体字库内)。
+// WMO code -> short English phrase.
 const char *home_weather_code_text(uint16_t code);
 
-// 蒲福风级:km/h → 0..12。
+// Beaufort scale: km/h -> 0..12.
 int home_weather_beaufort(uint8_t wind_kmh);
 
-// 风向 → 中文方位("北风"/"东南风";静风返回"无风")。字形均在 buddy 字库内。
+// Wind direction -> compass point ("N"/"SE"). Calm wind is handled by the caller.
 const char *home_weather_wind_dir_text(uint16_t deg);
 
-// 阻塞拉取(lat/lon 为十进制字符串)。在首页后台任务里调用,勿持 LVGL 锁。
+// Blocking fetch (lat/lon are decimal strings). Call from the home background task, do not hold the LVGL lock.
 esp_err_t home_weather_refresh(const char *lat, const char *lon);
 
-// 数据年龄短语:"刚刚"/"25分钟前"/"3小时前"/"2天前";updated_at 或 now 未知时
-// 返回 "离线数据"。纯函数,便于宿主测试。
+// Data age phrase: "Just now"/"25m ago"/"3h ago"/"2d ago"; when updated_at or now is unknown
+// returns "Offline". Pure function, easy to host-test.
 void home_weather_age_text(uint32_t updated_at, int64_t now, char *out, size_t capacity);
 
-// 每次成功刷新递增,UI 据此刷新天气行。
+// Incremented on every successful refresh; the UI uses it to refresh the weather row.
 uint32_t home_weather_version(void);
 
 #ifdef __cplusplus

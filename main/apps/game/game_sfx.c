@@ -1,4 +1,4 @@
-// main/apps/game/game_sfx.c —— 见 game_sfx.h 的设计说明。
+// main/apps/game/game_sfx.c -- see the design notes in game_sfx.h.
 #include "apps/game/game_sfx.h"
 
 #include "bsp_audio.h"
@@ -9,14 +9,14 @@
 
 static const char *TAG = "game_sfx";
 
-#define SFX_RATE  16000  /* 与采音同格式:bsp_audio_set_format(16000,16,1) */
-#define SFX_CHUNK 128    /* 每块 8ms;栈上 256B */
-#define SFX_AMP   4200   /* 方波幅度(±),比语音提示音略柔,避免刺耳 */
+#define SFX_RATE  16000  /* same format as the mic: bsp_audio_set_format(16000,16,1) */
+#define SFX_CHUNK 128    /* 8ms per chunk; 256B on the stack */
+#define SFX_AMP   4200   /* square-wave amplitude (+/-), softer than the voice prompts to avoid harshness */
 
-/* 开局竞态:game_start() 先起音效任务,采音任务要再过 ~200ms 才会
-   bsp_audio_set_format() 把输出打开(实测 14473 请求写、14667 才 open)。
-   旧实现"一次写失败就永久静音" → 开局那声必失败 → 整局都没音效。
-   改为有界重试:写失败先等 codec 就绪,超时(600ms)才判定不可用。 */
+/* Start-up race: game_start() starts the sfx task first, and the mic task only calls
+      bsp_audio_set_format() (which opens the output) ~200ms later (measured: write requested at 14473, open at 14667).
+      The old code went permanently silent after one failed write -> the start tone always failed -> no sfx all round.
+      Now it retries with a bound: on write failure wait for the codec, give up only after the timeout (600ms). */
 #define SFX_READY_WAIT_MS 600
 #define SFX_READY_STEP_MS 20
 
@@ -25,7 +25,7 @@ typedef struct {
     uint16_t ms;
 } sfx_seg_t;
 
-/* 音色表:每个音最多 3 段,段间无缝衔接。hz==0 表示结束。 */
+/* Tone table: up to 3 segments per tone, seamless between segments. hz==0 ends it. */
 static const sfx_seg_t kTone[GS_COUNT][3] = {
     [GS_START] = { { 740, 45 },  { 0, 0 },    { 0, 0 } },
     [GS_SCORE] = { { 1046, 55 }, { 0, 0 },    { 0, 0 } },
@@ -37,11 +37,11 @@ static TaskHandle_t s_task;
 static portMUX_TYPE s_task_mux = portMUX_INITIALIZER_UNLOCKED;
 static atomic_bool s_quit;
 static atomic_bool s_running;
-static atomic_int s_pending;     /* 0 = 无请求;只保留最后一次,不排队 */
-static bool s_muted;             /* codec 确实不可用后置 true,不再重试/刷日志 */
+static atomic_int s_pending;     /* 0 = no request; only the last one is kept, no queueing */
+static bool s_muted;             /* set true once the codec is really unavailable; no more retries/log spam */
 
-/* 写一块 PCM,失败则有界等待 codec 就绪后重试。
-   返回 false = 等满 SFX_READY_WAIT_MS 仍写不进去(codec 真的没开)。 */
+/* Write one PCM chunk; on failure wait (bounded) for the codec to become ready and retry.
+      Returns false = still cannot write after SFX_READY_WAIT_MS (the codec really is not open). */
 static bool write_blocking(const int16_t *buf, size_t bytes) {
     for (int waited = 0; waited < SFX_READY_WAIT_MS; waited += SFX_READY_STEP_MS) {
         if (atomic_load(&s_quit)) return false;
@@ -51,11 +51,11 @@ static bool write_blocking(const int16_t *buf, size_t bytes) {
     return false;
 }
 
-/* 生成并阻塞写出一段方波。I2S 写会等 DMA 完成并让出 CPU,不会饿死 LVGL。 */
+/* Generate and write one square-wave segment (blocking). The I2S write waits for DMA and yields the CPU, so it cannot starve LVGL. */
 static void play_seg(uint16_t hz, uint16_t ms) {
     if (hz == 0 || ms == 0) return;
     int16_t buf[SFX_CHUNK];
-    const int period = SFX_RATE / hz;   /* 每周期采样数,>1 保证 */
+    const int period = SFX_RATE / hz;   /* samples per period, guaranteed >1 */
     const int half = period > 1 ? period / 2 : 1;
     int left = (int)SFX_RATE * ms / 1000;
     int phase = 0;
@@ -67,8 +67,8 @@ static void play_seg(uint16_t hz, uint16_t ms) {
         }
         if (!write_blocking(buf, (size_t)n * sizeof(int16_t))) {
             if (!s_muted) {
-                s_muted = true;  /* 等满 600ms 仍写不进去——只报一次,别刷屏 */
-                ESP_LOGW(TAG, "codec 输出未就绪(等 %dms),本局关闭音效", SFX_READY_WAIT_MS);
+                s_muted = true;  /* still cannot write after 600ms -- report once, do not spam */
+                ESP_LOGW(TAG, "codec output not ready (waited %dms), sfx disabled for this round", SFX_READY_WAIT_MS);
             }
             return;
         }
@@ -79,7 +79,7 @@ static void play_seg(uint16_t hz, uint16_t ms) {
 static void sfx_task(void *arg) {
     (void)arg;
     for (;;) {
-        /* 等待通知:不占队列 RAM,也不需要额外的信号量。 */
+        /* Wait for a notification: uses no queue RAM and needs no extra semaphore. */
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (atomic_load(&s_quit)) break;
         const int id = atomic_exchange(&s_pending, 0);
@@ -103,10 +103,10 @@ void game_sfx_start(void) {
     s_muted = false;
     atomic_store(&s_quit, false);
     atomic_store(&s_running, true);
-    /* 优先级 5(高于 LVGL 4):提示音只有几十毫秒,且 I2S 写阻塞时会让出 CPU,
-       不会拖慢渲染;低于它会让音效明显滞后于画面。 */
+    /* Priority 5 (above LVGL 4): tones last only tens of ms, and a blocking I2S write yields the CPU,
+          so rendering is not slowed; a lower priority would make the sfx visibly lag the picture. */
     if (xTaskCreate(sfx_task, "game_sfx", 2048, NULL, 5, &s_task) != pdPASS) {
-        ESP_LOGW(TAG, "音效任务创建失败,本局无音效");
+        ESP_LOGW(TAG, "sfx task creation failed, no sfx this round");
         s_task = NULL;
         atomic_store(&s_running, false);
     }

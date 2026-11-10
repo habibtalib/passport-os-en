@@ -19,11 +19,11 @@ lv_obj_t *s_screen, *s_ssid, *s_info;
 lv_timer_t *s_timer;
 void refresh() {
     auto &wifi = WifiManager::GetInstance();
-    // Same subset Chinese font as the existing network picker; label is bounded.
+    // Same subset font as the existing network picker; label is bounded.
     const auto ssid = passport::ssid_display(wifi.GetSsid(), &buddy_font_16);
-    ui_pixel_label_set_text(s_ssid, wifi.IsConnected() ? ssid.c_str() : "未连接无线网络");
-    const char *internet[] = {"未连接", "正在检查", "可以上网", "需网页登录", "无法上网"};
-    char proxy[32], age[32] = "暂无天气", synced[24] = "未校时";
+    ui_pixel_label_set_text(s_ssid, wifi.IsConnected() ? ssid.c_str() : "Wi-Fi not connected");
+    const char *internet[] = {"Offline", "Checking", "Online", "Web login needed", "No internet"};
+    char proxy[32], age[32] = "No weather", synced[24] = "Not synced";
     uint16_t port = 0;
     const int route = passport_muse_proxy_route_info(proxy, sizeof(proxy), &port);
     const time_t last = time_sync_last_epoch() + time_sync_tz_offset_sec();
@@ -35,9 +35,9 @@ void refresh() {
     if (home_weather_get(&weather) && weather.valid) home_weather_age_text(weather.updated_at, time_sync_valid() ? time(nullptr) : 0, age, sizeof(age));
     const int tz = time_sync_tz_offset_sec() / 60;
     char text[512];
-    std::snprintf(text, sizeof(text), "RSSI %d dBm\nIP %s\n%s\nMuse %s\n%s:%u\n校时 %s\nUTC%c%02d:%02d\n天气 %s\n电量 %d%%", wifi.GetRssi(),
+    std::snprintf(text, sizeof(text), "RSSI %d dBm\nIP %s\n%s\nMuse %s\n%s:%u\nTime sync %s\nUTC%c%02d:%02d\nWeather %s\nBattery %d%%", wifi.GetRssi(),
         wifi.IsConnected() ? wifi.GetIpAddress().c_str() : "--", internet[static_cast<int>(wifi.GetInternetStatus())],
-        route == 1 ? "电脑代理" : "直连", route ? proxy : "--", port,
+        route == 1 ? "PC proxy" : "Direct", route ? proxy : "--", port,
         synced, tz < 0 ? '-' : '+', std::abs(tz) / 60, std::abs(tz) % 60, age, bsp_battery_soc());
     ui_pixel_label_set_text(s_info, text);
 }
@@ -46,13 +46,13 @@ bool network_diagnostics_active() { return s_screen != nullptr; }
 void network_diagnostics_open() {
     bsp_lvgl_lock(-1);
     s_screen = lv_obj_create(nullptr); ui_pixel_background(s_screen);
-    auto *title = ui_pixel_label(s_screen, "网络与时间", &buddy_font_16, UI_TEXT);
+    auto *title = ui_pixel_label(s_screen, "Network & Time", &buddy_font_16, UI_TEXT);
     lv_obj_set_pos(title, 12, 8);
     s_ssid = ui_pixel_label(s_screen, "", &buddy_font_16, UI_ACCENT);
     lv_obj_set_pos(s_ssid, 12, 36); lv_obj_set_width(s_ssid, 216); lv_label_set_long_mode(s_ssid, LV_LABEL_LONG_DOT);
     s_info = ui_pixel_label(s_screen, "", &buddy_font_16, UI_TEXT);
     lv_obj_set_pos(s_info, 12, 64); lv_obj_set_size(s_info, 216, 220); lv_obj_set_style_text_line_space(s_info, 4, 0);
-    ui_pixel_footer(s_screen, "确定返回设置", "长按确定退出", &buddy_font_16);
+    ui_pixel_footer(s_screen, "OK: back to Settings", "Hold OK: exit", &buddy_font_16);
     refresh(); s_timer = lv_timer_create([](lv_timer_t *) {
         if (app_registry_screen_is_on()) refresh();
     }, 2000, nullptr);

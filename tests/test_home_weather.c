@@ -93,7 +93,7 @@ int main(int argc,char **argv) {
         assert(!home_profile_coordinates_valid(*p,"113.6"));
     assert(!home_profile_coordinates_valid("22",""));
     home_profile_init();home_weather_init();home_weather_t weather;assert(!home_weather_get(&weather));
-    strcpy(zhuhai.city,"珠海");strcpy(zhuhai.region,"广东");strcpy(zhuhai.radio_city,"珠海");strcpy(zhuhai.country_code,"CN");
+    strcpy(zhuhai.city,"Zhuhai");strcpy(zhuhai.region,"Guangdong");strcpy(zhuhai.radio_city,"珠海");strcpy(zhuhai.country_code,"CN");
     strcpy(zhuhai.lat,"22.2707");strcpy(zhuhai.lon,"113.5767");
     assert(home_profile_set_text(&zhuhai)==ESP_OK);
     assert(home_weather_refresh(zhuhai.lat,zhuhai.lon)==ESP_OK);
@@ -105,13 +105,13 @@ int main(int argc,char **argv) {
         const uint32_t stamp=weather.updated_at;
         home_weather_init();assert(home_weather_get(&weather)&&weather.updated_at==stamp);
         char age[24];
-        home_weather_age_text(stamp,stamp+30,age,sizeof(age));assert(!strcmp(age,"刚刚"));
-        home_weather_age_text(stamp,stamp+25*60,age,sizeof(age));assert(!strcmp(age,"25分钟前"));
-        home_weather_age_text(stamp,stamp+3*3600+5,age,sizeof(age));assert(!strcmp(age,"3小时前"));
-        home_weather_age_text(stamp,stamp+2*86400,age,sizeof(age));assert(!strcmp(age,"2天前"));
-        home_weather_age_text(0,stamp,age,sizeof(age));assert(!strcmp(age,"离线数据"));
-        home_weather_age_text(stamp,0,age,sizeof(age));assert(!strcmp(age,"离线数据"));
-        home_weather_age_text(stamp,stamp-100,age,sizeof(age));assert(!strcmp(age,"刚刚"));
+        home_weather_age_text(stamp,stamp+30,age,sizeof(age));assert(!strcmp(age,"Just now"));
+        home_weather_age_text(stamp,stamp+25*60,age,sizeof(age));assert(!strcmp(age,"25m ago"));
+        home_weather_age_text(stamp,stamp+3*3600+5,age,sizeof(age));assert(!strcmp(age,"3h ago"));
+        home_weather_age_text(stamp,stamp+2*86400,age,sizeof(age));assert(!strcmp(age,"2d ago"));
+        home_weather_age_text(0,stamp,age,sizeof(age));assert(!strcmp(age,"Offline"));
+        home_weather_age_text(stamp,0,age,sizeof(age));assert(!strcmp(age,"Offline"));
+        home_weather_age_text(stamp,stamp-100,age,sizeof(age));assert(!strcmp(age,"Just now"));
     }
     // The device follows the city's UTC offset (India +5:30); junk offsets are ignored.
     weather_response="{\"utc_offset_seconds\":19800,\"current\":{\"temperature_2m\":30,\"weather_code\":0,\"relative_humidity_2m\":50,\"wind_speed_10m\":5,\"wind_direction_10m\":90}}";
@@ -130,7 +130,7 @@ int main(int argc,char **argv) {
         assert(home_weather_get(&weather)&&weather.temp_c==26&&weather.humidity==77);
     }
     weather_response=response;
-    home_profile_t beijing=zhuhai;strcpy(beijing.city,"北京");strcpy(beijing.region,"北京");strcpy(beijing.radio_city,"北京");
+    home_profile_t beijing=zhuhai;strcpy(beijing.city,"Beijing");strcpy(beijing.region,"Beijing");strcpy(beijing.radio_city,"北京");
     strcpy(beijing.lat,"39.9042");strcpy(beijing.lon,"116.4074");
     fail_commit=true;assert(home_profile_set_text(&beijing)==ESP_FAIL);assert(home_weather_get(&weather));
     fail_commit=false;assert(home_profile_set_text(&beijing)==ESP_OK);assert(!home_weather_get(&weather)&&!weather.valid);
@@ -143,8 +143,8 @@ int main(int argc,char **argv) {
     home_profile_t invalid=zhuhai;strcpy(invalid.lat,"91");assert(home_profile_set_text(&invalid)==ESP_ERR_INVALID_ARG);
     // Old NVS profiles omit the added metadata, and still load existing city/coords.
     memset(stored,0,sizeof(stored));
-    nvs_handle_t h;nvs_open("home_profile",NVS_READWRITE,&h);nvs_set_str(h,"city","珠海");nvs_set_str(h,"lat","22.2707");nvs_set_str(h,"lon","113.5767");nvs_commit(h);
-    home_profile_init();home_profile_get(&invalid);assert(!strcmp(invalid.city,"珠海")&&!invalid.region[0]&&!invalid.country_code[0]);
+    nvs_handle_t h;nvs_open("home_profile",NVS_READWRITE,&h);nvs_set_str(h,"city","Zhuhai");nvs_set_str(h,"lat","22.2707");nvs_set_str(h,"lon","113.5767");nvs_commit(h);
+    home_profile_init();home_profile_get(&invalid);assert(!strcmp(invalid.city,"Zhuhai")&&!invalid.region[0]&&!invalid.country_code[0]);
     // PM2.5 uses the same location, with independent validity and no persistent cache.
     home_air_quality_t air;char label[32];assert(!home_air_quality_get(&air));
     assert(home_air_quality_refresh(zhuhai.lat,zhuhai.lon)==ESP_OK);

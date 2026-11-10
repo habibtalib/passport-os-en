@@ -26,10 +26,10 @@ int main() {
     assert(!start_voice_transport()); assert((calls==std::vector<int>{1,2,3,4}));
     calls.clear(); audio_result=0;
     assert(start_voice_transport()); assert((calls==std::vector<int>{1,2}));
-    assert(!strcmp(voice_error_detail("REPLY OUT OF MEMORY"),"接收内存不足，请返回重试"));
-    assert(!strcmp(voice_error_detail("OUT OF MEMORY"),"录音内存不足，松开上键后重试"));
-    assert(!strcmp(voice_error_detail("REPLY EVENT TOO LARGE"),"回复数据过大，请在手机查看"));
-    assert(!strcmp(voice_error_detail("REPLY BUFFER LIMIT - TRY AGAIN"),"回复缓存已满，请在手机查看"));
+    assert(!strcmp(voice_error_detail("REPLY OUT OF MEMORY"),"Low memory, go back and retry"));
+    assert(!strcmp(voice_error_detail("OUT OF MEMORY"),"Rec memory low, release Up, retry"));
+    assert(!strcmp(voice_error_detail("REPLY EVENT TOO LARGE"),"Reply too large, view on phone"));
+    assert(!strcmp(voice_error_detail("REPLY BUFFER LIMIT - TRY AGAIN"),"Reply buffer full, view on phone"));
 }
 '''
 with tempfile.TemporaryDirectory() as temp:

@@ -1,7 +1,3 @@
-<p align="right">
-  <a href="CODE_OF_CONDUCT.zh_CN.md">简体中文</a> · <strong>English</strong>
-</p>
-
 # Contributor Covenant Code of Conduct
 
 ## Our Pledge

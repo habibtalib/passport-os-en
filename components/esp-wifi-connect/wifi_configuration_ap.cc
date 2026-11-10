@@ -209,11 +209,11 @@ void WifiConfigurationAp::StartAccessPoint()
 
     ESP_LOGI(TAG, "Access Point started with SSID %s (open)", ssid.c_str());
 
-    // 加载高级配置
+    // Load advanced config
     nvs_handle_t nvs;
     esp_err_t err = nvs_open("wifi", NVS_READONLY, &nvs);
     if (err == ESP_OK) {
-        // 读取OTA URL
+        // Read OTA URL
         char ota_url[256] = {0};
         size_t ota_url_size = sizeof(ota_url);
         err = nvs_get_str(nvs, "ota_url", ota_url, &ota_url_size);
@@ -221,7 +221,7 @@ void WifiConfigurationAp::StartAccessPoint()
             ota_url_ = ota_url;
         }
 
-        // 读取WiFi功率
+        // Read WiFi power
         err = nvs_get_i8(nvs, "max_tx_power", &max_tx_power_);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "WiFi max tx power from NVS: %d", max_tx_power_);
@@ -230,22 +230,22 @@ void WifiConfigurationAp::StartAccessPoint()
             esp_wifi_get_max_tx_power(&max_tx_power_);
         }
 
-        // 读取BSSID记忆设置
+        // Read BSSID memory setting
         uint8_t remember_bssid = 0;
         err = nvs_get_u8(nvs, "remember_bssid", &remember_bssid);
         if (err == ESP_OK) {
             remember_bssid_ = remember_bssid != 0;
         } else {
-            remember_bssid_ = false; // 默认值
+            remember_bssid_ = false; // default value
         }
 
-        // 读取睡眠模式设置
+        // Read sleep mode setting
         uint8_t sleep_mode = 0;
         err = nvs_get_u8(nvs, "sleep_mode", &sleep_mode);
         if (err == ESP_OK) {
             sleep_mode_ = sleep_mode != 0;
         } else {
-            sleep_mode_ = true; // 默认值
+            sleep_mode_ = true; // default value
         }
 
         nvs_close(nvs);
@@ -391,7 +391,7 @@ void WifiConfigurationAp::StartWebServer()
         .handler = [](httpd_req_t *req) -> esp_err_t {
             char *buf;
             size_t buf_len = req->content_len;
-            if (buf_len > 1024) { // 限制最大请求体大小
+            if (buf_len > 1024) { // limit the max request body size
                 httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Payload too large");
                 return ESP_FAIL;
             }
@@ -414,7 +414,7 @@ void WifiConfigurationAp::StartWebServer()
             }
             buf[ret] = '\0';
 
-            // 解析 JSON 数据
+            // Parse JSON data
             cJSON *json = cJSON_Parse(buf);
             free(buf);
             if (!json) {
@@ -437,7 +437,7 @@ void WifiConfigurationAp::StartWebServer()
                 password_str = password_item->valuestring;
             }
 
-            // 获取当前对象
+            // Get the current object
             wifi_phone_time_apply(json);
             auto *this_ = static_cast<WifiConfigurationAp *>(req->user_ctx);
             if (!this_->ConnectToWifi(ssid_str, password_str)) {
@@ -448,7 +448,7 @@ void WifiConfigurationAp::StartWebServer()
 
             this_->Save(ssid_str, password_str);
             cJSON_Delete(json);
-            // 设置成功响应
+            // Set success response
             httpd_resp_set_type(req, "application/json");
             httpd_resp_set_hdr(req, "Connection", "close");
             httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
@@ -478,21 +478,21 @@ void WifiConfigurationAp::StartWebServer()
         .handler = [](httpd_req_t *req) -> esp_err_t {
             auto* this_ = static_cast<WifiConfigurationAp*>(req->user_ctx);
             
-            // 设置响应头，防止浏览器缓存
+            // Set response headers to prevent browser caching
             httpd_resp_set_type(req, "application/json");
             httpd_resp_set_hdr(req, "Cache-Control", "no-store");
             httpd_resp_set_hdr(req, "Connection", "close");
-            // 发送响应
+            // Send response
             httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
             
-            // 延迟调用回调，确保HTTP响应完全发送
+            // Delay the callback to make sure the HTTP response is fully sent
             ESP_LOGI(TAG, "Exiting config mode...");
             xTaskCreate([](void *ctx) {
-                // 等待200ms确保HTTP响应完全发送
+                // Wait 200ms to make sure the HTTP response is fully sent
                 vTaskDelay(pdMS_TO_TICKS(200));
                 
                 auto* self = static_cast<WifiConfigurationAp*>(ctx);
-                // 通知回调退出配网模式
+                // Notify the callback to exit config mode
                 if (self->on_exit_requested_) {
                     self->on_exit_requested_();
                 }
@@ -546,17 +546,17 @@ void WifiConfigurationAp::StartWebServer()
         .uri = "/advanced/config",
         .method = HTTP_GET,
         .handler = [](httpd_req_t *req) -> esp_err_t {
-            // 获取当前对象
+            // Get the current object
             auto *this_ = static_cast<WifiConfigurationAp *>(req->user_ctx);
             
-            // 创建JSON对象
+            // Create JSON object
             cJSON *json = cJSON_CreateObject();
             if (!json) {
                 httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create JSON");
                 return ESP_FAIL;
             }
 
-            // 添加配置项到JSON
+            // Add config items to JSON
             if (!this_->ota_url_.empty()) {
                 cJSON_AddStringToObject(json, "ota_url", this_->ota_url_.c_str());
             }
@@ -566,7 +566,7 @@ void WifiConfigurationAp::StartWebServer()
             cJSON_AddBoolToObject(json, "show_ota_config", this_->show_ota_config_);
             cJSON_AddBoolToObject(json, "show_sleep_config", this_->show_sleep_config_);
 
-            // 发送JSON响应
+            // Send JSON response
             char *json_str = cJSON_PrintUnformatted(json);
             cJSON_Delete(json);
             if (!json_str) {
@@ -614,7 +614,7 @@ void WifiConfigurationAp::StartWebServer()
             }
             buf[ret] = '\0';
 
-            // 解析JSON数据
+            // Parse JSON data
             cJSON *json = cJSON_Parse(buf);
             free(buf);
             if (!json) {
@@ -622,10 +622,10 @@ void WifiConfigurationAp::StartWebServer()
                 return ESP_FAIL;
             }
 
-            // 获取当前对象
+            // Get the current object
             auto *this_ = static_cast<WifiConfigurationAp *>(req->user_ctx);
 
-            // 打开NVS
+            // Open NVS
             nvs_handle_t nvs;
             esp_err_t err = nvs_open("wifi", NVS_READWRITE, &nvs);
             if (err != ESP_OK) {
@@ -634,7 +634,7 @@ void WifiConfigurationAp::StartWebServer()
                 return ESP_FAIL;
             }
 
-            // 保存OTA URL
+            // Save OTA URL
             cJSON *ota_url = cJSON_GetObjectItem(json, "ota_url");
             if (cJSON_IsString(ota_url) && ota_url->valuestring) {
                 this_->ota_url_ = ota_url->valuestring;
@@ -644,7 +644,7 @@ void WifiConfigurationAp::StartWebServer()
                 }
             }
 
-            // 保存WiFi功率
+            // Save WiFi power
             cJSON *max_tx_power = cJSON_GetObjectItem(json, "max_tx_power");
             if (cJSON_IsNumber(max_tx_power)) {
                 this_->max_tx_power_ = max_tx_power->valueint;
@@ -660,7 +660,7 @@ void WifiConfigurationAp::StartWebServer()
                 }
             }
 
-            // 保存BSSID记忆设置
+            // Save BSSID memory setting
             cJSON *remember_bssid = cJSON_GetObjectItem(json, "remember_bssid");
             if (cJSON_IsBool(remember_bssid)) {
                 this_->remember_bssid_ = cJSON_IsTrue(remember_bssid);
@@ -670,7 +670,7 @@ void WifiConfigurationAp::StartWebServer()
                 }
             }
 
-            // 保存睡眠模式设置
+            // Save sleep mode setting
             cJSON *sleep_mode = cJSON_GetObjectItem(json, "sleep_mode");
             if (cJSON_IsBool(sleep_mode)) {
                 this_->sleep_mode_ = cJSON_IsTrue(sleep_mode);
@@ -680,7 +680,7 @@ void WifiConfigurationAp::StartWebServer()
                 }
             }
 
-            // 提交更改
+            // Commit changes
             err = nvs_commit(nvs);
             nvs_close(nvs);
             cJSON_Delete(json);
@@ -690,7 +690,7 @@ void WifiConfigurationAp::StartWebServer()
                 return ESP_FAIL;
             }
 
-            // 发送成功响应
+            // Send success response
             httpd_resp_set_type(req, "application/json");
             httpd_resp_set_hdr(req, "Connection", "close");
             httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
@@ -713,7 +713,7 @@ bool WifiConfigurationAp::ConnectToWifi(const std::string &ssid, const std::stri
         return false;
     }
     
-    if (ssid.length() > 32) {  // WiFi SSID 最大长度
+    if (ssid.length() > 32) {  // WiFi SSID max length
         ESP_LOGE(TAG, "SSID too long");
         return false;
     }
@@ -896,16 +896,16 @@ void WifiConfigurationAp::IpEventHandler(void* arg, esp_event_base_t event_base,
 #if !CONFIG_IDF_TARGET_ESP32P4
 void WifiConfigurationAp::StartSmartConfig()
 {
-    // 注册SmartConfig事件处理器
+    // Register SmartConfig event handler
     ESP_ERROR_CHECK(esp_event_handler_instance_register(SC_EVENT, ESP_EVENT_ANY_ID,
                                                         &WifiConfigurationAp::SmartConfigEventHandler, this, &sc_event_instance_));
 
-    // 初始化SmartConfig配置
+    // Initialize SmartConfig config
     smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
     // cfg.esp_touch_v2_enable_crypt = true;
-    // cfg.esp_touch_v2_key = "1234567890123456"; // 设置16字节加密密钥
+    // cfg.esp_touch_v2_key = "1234567890123456"; // set a 16-byte encryption key
 
-    // 启动SmartConfig服务
+    // Start the SmartConfig service
     ESP_ERROR_CHECK(esp_smartconfig_start(&cfg));
     ESP_LOGI(TAG, "SmartConfig started");
 }
@@ -931,9 +931,9 @@ void WifiConfigurationAp::SmartConfigEventHandler(void *arg, esp_event_base_t ev
             memcpy(ssid, evt->ssid, sizeof(evt->ssid));
             memcpy(password, evt->password, sizeof(evt->password));
             ESP_LOGI(TAG, "SmartConfig SSID: %s, Password: %s", ssid, password);
-            // 尝试连接WiFi会失败，故不连接
+            // Trying to connect to WiFi would fail, so do not connect
             self->Save(ssid, password);
-            // 延迟退出配网模式
+            // Delay exiting config mode
             xTaskCreate([](void *ctx){
                 ESP_LOGI(TAG, "Exiting config mode in 1 second");
                 vTaskDelay(pdMS_TO_TICKS(1000));
@@ -956,7 +956,7 @@ void WifiConfigurationAp::SmartConfigEventHandler(void *arg, esp_event_base_t ev
 
 void WifiConfigurationAp::Stop() {
 #if !CONFIG_IDF_TARGET_ESP32P4
-    // 停止SmartConfig服务
+    // Stop the SmartConfig service
     if (sc_event_instance_) {
         esp_event_handler_instance_unregister(SC_EVENT, ESP_EVENT_ANY_ID, sc_event_instance_);
         sc_event_instance_ = nullptr;
@@ -964,26 +964,26 @@ void WifiConfigurationAp::Stop() {
     esp_smartconfig_stop();
 #endif
 
-    // 停止定时器
+    // Stop the timer
     if (scan_timer_) {
         esp_timer_stop(scan_timer_);
         esp_timer_delete(scan_timer_);
         scan_timer_ = nullptr;
     }
 
-    // 停止Web服务器
+    // Stop the web server
     if (server_) {
         httpd_stop(server_);
         server_ = nullptr;
     }
 
-    // 停止DNS服务器
+    // Stop the DNS server
     if (dns_server_) {
         dns_server_->Stop();
         dns_server_.reset();
     }
 
-    // 注销事件处理器
+    // Unregister event handlers
     if (instance_any_id_) {
         esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id_);
         instance_any_id_ = nullptr;
@@ -993,10 +993,10 @@ void WifiConfigurationAp::Stop() {
         instance_got_ip_ = nullptr;
     }
 
-    // 停止WiFi（但不 deinit，WiFi 驱动由 WifiManager 管理）
+    // Stop WiFi (but do not deinit; the WiFi driver is managed by WifiManager)
     esp_wifi_stop();
     
-    // 销毁网络接口
+    // Destroy network interface
     if (ap_netif_) {
         esp_netif_destroy_default_wifi(ap_netif_);
         ap_netif_ = nullptr;

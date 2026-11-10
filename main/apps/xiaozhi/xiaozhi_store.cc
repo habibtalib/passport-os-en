@@ -12,8 +12,8 @@ const char *const kNsWebsocket = "websocket";
 
 namespace {
 
-// NVS 的 str 读取需要两步，且长度含结尾 '\0'。这里统一处理并保证返回的
-// std::string 不含结尾 NUL —— 否则拼进 HTTP 头/URL 会多一个不可见字节。
+// NVS str reads take two steps, and the length includes the trailing '\0'. Handled here once, ensuring the returned
+// std::string has no trailing NUL -- otherwise an extra invisible byte would end up in HTTP headers/URLs.
 bool read_str(nvs_handle_t h, const char *key, std::string &out) {
     size_t len = 0;
     esp_err_t err = nvs_get_str(h, key, nullptr, &len);

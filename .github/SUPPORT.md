@@ -1,7 +1,3 @@
-<p align="right">
-  <a href="SUPPORT.zh_CN.md">简体中文</a> · <strong>English</strong>
-</p>
-
 # Support
 
 FoloToy AI Passport is open-source hardware and firmware. The community can help
@@ -12,7 +8,7 @@ guaranteed.
 ## Where to start
 
 - Hardware facts, wiring, and known traps: read
-  [`README.md`](../docs/README.md) and the
+  [`README.md`](../README.md) and the
   [AI Hardware Development Guide](../docs/hardware-design/AI_HARDWARE_DEVELOPMENT_GUIDE.md).
 - AI agent workflow and engineering rules: read
   [`AGENTS.md`](../AGENTS.md) and its rule index.

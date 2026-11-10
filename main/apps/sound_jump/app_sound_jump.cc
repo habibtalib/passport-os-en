@@ -29,7 +29,7 @@ uint32_t sequence,last_ms,accum,calibration_waiting;
 int camera,flash;
 constexpr uint32_t sky=0x121E27,soil=0x31414A,mint=0xA8DB97,gold=0xF2CA6D,red=0xF18D80;
 constexpr uint32_t claude_orange=0xEF765A,claude_eye=0x170D16;
-const char *sens_names[]={"灵敏","标准","抗噪"};
+const char *sens_names[]={"Sensitive","Normal","Noise-proof"};
 
 lv_obj_t *text(lv_obj_t *parent,const char *s,int x,int y,int w,int h,const lv_font_t *font,uint32_t color){
  auto *o=lv_label_create(parent);lv_label_set_text(o,s);lv_obj_set_pos(o,x,y);lv_obj_set_size(o,w,h);
@@ -124,31 +124,31 @@ void refresh(){
  lv_obj_set_flag(track,LV_OBJ_FLAG_HIDDEN,view!=PLAY);
  bool overlay=view!=PLAY&&view!=READY;lv_obj_set_flag(panel,LV_OBJ_FLAG_HIDDEN,!overlay);
  lv_obj_set_flag(ready_rule,LV_OBJ_FLAG_HIDDEN,view!=READY);
- const char *title="",*body="",*action="",*foot="",*nav="长按确定返回";
+ const char *title="",*body="",*action="",*foot="",*nav="Hold OK: back";
  char bodybuf[160];
  switch(view){
  case CALIBRATE:
-  title=mic.ready?"安静两秒":"准备麦克风";
-  body="马上开始";break;
+  title=mic.ready?"Quiet for 2 s":"Preparing mic";
+  body="Starting soon";break;
  case READY:
-  title="长声跳远，短声跳近";body="轻轻说「啊」，停声就跳";
-  action="";foot="确定开始 · 上下选关";break;
+  title="Long=far, short=near";body="Say 'ah', stop to jump";
+  action="";foot="OK: start · Up/Down: level";break;
  case PLAY:
-  foot=mic.charging?(mic.power==255?"蓄满了，停声起跳":"停声就跳"):game.phase==SJ_FLYING?"":flash?"落地！":"发声蓄力";
-  nav="确定暂停 · 长按返回";break;
+  foot=mic.charging?(mic.power==255?"Fully charged, stop":"Stop to jump"):game.phase==SJ_FLYING?"":flash?"Landed!":"Make sound to charge";
+  nav="OK: pause · Hold: back";break;
  case PAUSE:
-  title="暂停";snprintf(bodybuf,sizeof(bodybuf),"收音：%s\n上下键调整",sens_names[mic.sensitivity]);body=bodybuf;
-  action="确定继续";foot="长按下键重开校准";break;
+  title="Paused";snprintf(bodybuf,sizeof(bodybuf),"Mic: %s\nUp/Down: adjust",sens_names[mic.sensitivity]);body=bodybuf;
+  action="OK: resume";foot="Hold Down: recalibrate";break;
  case DEAD:
-  title=game.failure==SJ_SPIKE?"碰到刺了":game.failure==SJ_BROKEN?"浮岛碎了":"差一点！";
-  body=game.checkpoint?"从最近的旗帜继续":"再试一次";
-  action="确定再来";foot="上键从头开始";break;
+  title=game.failure==SJ_SPIKE?"Hit a spike":game.failure==SJ_BROKEN?"Island broke":"So close!";
+  body=game.checkpoint?"Resume at last flag":"Try again";
+  action="OK: retry";foot="Up: restart";break;
  case CLEAR:
-  title=game.level==7?"通关！换你来":"过关！";
-  snprintf(bodybuf,sizeof(bodybuf),"%u 星 · 音符 %u/%u\n%lu 秒 · 失误 %u 次",sj_stars(&game),sj_note_count(game.notes),sj_note_total(&game),(unsigned long)(game.elapsed_ticks/50),game.deaths);body=bodybuf;
-  action=game.level==7?"确定选关":"确定下一关";foot="上键重玩";break;
+  title=game.level==7?"All clear!":"Level clear!";
+  snprintf(bodybuf,sizeof(bodybuf),"%u stars · Notes %u/%u\n%lu s · Misses %u",sj_stars(&game),sj_note_count(game.notes),sj_note_total(&game),(unsigned long)(game.elapsed_ticks/50),game.deaths);body=bodybuf;
+  action=game.level==7?"OK: levels":"OK: next level";foot="Up: replay";break;
  case ERROR:
-  title="麦克风暂不可用";body="请退出后重新进入";foot="退出后重新进入";break;
+  title="Mic unavailable";body="Exit and re-enter";foot="Exit and re-enter";break;
  }
  ui_pixel_label_set_text(panel_title,title);ui_pixel_label_set_text(panel_body,body);ui_pixel_label_set_text(panel_action,action);
  ui_pixel_label_set_text(footer,foot);ui_pixel_label_set_text(navigation,nav);
@@ -191,7 +191,7 @@ void start(){
  if(!bsp_lvgl_lock(-1)){sj_mic_stop();return;}
  screen=lv_obj_create(nullptr);ui_pixel_background(screen);
  auto *top=ui_pixel_top_bar(screen);
- auto *title=text(top,"声音跳一跳",12,3,80,20,&buddy_font_16,UI_TEXT);
+ auto *title=text(top,"Jump",12,3,80,20,&buddy_font_16,UI_TEXT);
  ui_pixel_status_text_align(title,12,80,LV_TEXT_ALIGN_LEFT);
  heading=text(top,"",100,4,UI_STATUS_CONTENT_RIGHT-100,16,&lv_font_montserrat_14,UI_ACCENT);
  ui_pixel_status_text_align(heading,100,UI_STATUS_CONTENT_RIGHT-100,LV_TEXT_ALIGN_RIGHT);
@@ -205,7 +205,7 @@ void start(){
  lv_obj_set_width(hint,152);
  track=ui_pixel_panel_create(screen,16,259,208,6,UI_BORDER);lv_obj_set_style_border_width(track,0,0);
  meter=ui_pixel_panel_create(screen,16,259,2,6,gold);lv_obj_set_style_border_width(meter,0,0);
- ready_rule=text(screen,"长声跳远，短声跳近",12,91,216,22,&buddy_font_16,
+ ready_rule=text(screen,"Long=far, short=near",12,91,216,22,&buddy_font_16,
                  ui_theme_get()==UI_THEME_PLAYFUL?gold:UI_TEXT);
  lv_obj_set_style_text_align(ready_rule,LV_TEXT_ALIGN_CENTER,0);
  auto *rule=ui_pixel_panel_create(screen,12,272,216,1,UI_BORDER);lv_obj_set_style_border_width(rule,0,0);
@@ -247,6 +247,6 @@ void on_key(uint8_t btn,app_btn_event_t event,uint16_t){
 }
 }
 extern const passport_app_t g_sound_jump_app={
- .id=APP_ID_SOUND_JUMP,.name="声音跳一跳",.en_name="SOUND JUMP",.desc="长声跳远，短声跳近\n停声就跳",.tag="VOICE GAME",.theme_color=gold,
+ .id=APP_ID_SOUND_JUMP,.name="Sound Jump",.en_name="SOUND JUMP",.desc="Long=far, short=near\nStop sound to jump",.tag="VOICE GAME",.theme_color=gold,
  .init=init,.start=start,.stop=stop,.on_key=on_key
 };

@@ -1,4 +1,4 @@
-// main/apps/voice/mode.h —— 链路通道抽象
+// main/apps/voice/mode.h -- link channel abstraction
 #pragma once
 
 #include "app_types.h"

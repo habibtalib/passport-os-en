@@ -1,6 +1,6 @@
 ---
 name: Passport OS shared UI
-description: 2026-10-05 经确认的 240×320 LVGL 整机视觉改版记录
+description: Confirmed 2026-10-05 visual revision of the 240x320 LVGL whole-device UI
 colors:
   travel-bg: "#181B1C"
   travel-surface: "#202526"
@@ -86,86 +86,86 @@ components:
 
 ## Overview
 
-本轮依据整机实机审视与 13 页交互预览落实视觉改版。用户明确要求首页保留原布局、去掉方框；其他页面按逐页方案优化。实现以原有实体按键、真实状态、声音与游戏逻辑为边界。
+This round of the visual revision is based on a hands-on review of the whole device and a 13-page interaction preview. The user explicitly asked to keep the original Home layout and drop the boxes; other pages are optimized page by page. The implementation stays within the bounds of the existing physical buttons, real state, audio and game logic.
 
-共享布局保留旅行仪器和经典绿，并增加“像素白”（rc.25 起由“多彩像素”更名）：中性浅色画布、淡灰绿表面，配莓红、湖蓝、橙色和薄荷绿的功能强调。首页使用同色相的深色场景版本。rc.26 增加高饱和多彩暗色主题“霓虹黑”。四套主题共享布局、字体和图像。运行时以 `UI_*` 语义角色、`ui_theme_color()` 及 `ui_theme_color_on_dark()` 为实现来源；上方数值记录现有 palette，不能用于绕开主题 API。
+The shared layout keeps the Travel Instrument and Classic Green themes and adds "Pixel White" (renamed from "Colorful Pixel" in rc.25): a neutral light canvas and pale gray-green surfaces, with raspberry, lake blue, orange and mint green as functional accents. Home uses a dark-scene variant of the same hues. rc.26 adds a high-saturation, multicolor dark theme, "Neon Black". All four themes share layout, fonts and images. At runtime the source of truth is the `UI_*` semantic roles, `ui_theme_color()` and `ui_theme_color_on_dark()`; the values above record the existing palettes and must not be used to bypass the theme API.
 
 **Key Characteristics:**
-- 固定小屏，文字、状态与实体按键说明优先。
-- 方角几何与平面色块；共享构件不依赖阴影表达层级。
-- 应用可有局部场景色；它们不自动成为全机配色。
+- Fixed small screen; text, status and physical-button hints come first.
+- Square geometry and flat color blocks; shared components do not rely on shadows for hierarchy.
+- Apps may have local scene colors; these do not automatically become device-wide colors.
 
 ## Colors
 
 ### Primary
 
-`travel-accent` / `classic-accent` 对应 `UI_ACCENT`，用于强调状态、标题或动作；其反色文字使用 `UI_ON_ACCENT`。`UI_SUCCESS` 和 `UI_DANGER` 是已有状态角色，经典主题中成功与强调共用色值。
+`travel-accent` / `classic-accent` map to `UI_ACCENT`, used to emphasize status, titles or actions; text on top of it uses `UI_ON_ACCENT`. `UI_SUCCESS` and `UI_DANGER` are existing status roles; in the Classic theme, success and accent share one color value.
 
 ### Neutral
 
-四套主题分别保留背景、表面、选中表面、边界、主文字和次文字角色。默认主题是经典绿。等待状态使用 `UI_WARNING` 并同时显示文字。值取自 `ui_pixel.c::s_palettes`，角色取自 `ui_palette.h`。
+Each of the four themes keeps roles for background, surface, selected surface, border, primary text and secondary text. The default theme is Classic Green. The waiting state uses `UI_WARNING` and always shows text as well. Values come from `ui_pixel.c::s_palettes`; roles come from `ui_palette.h`.
 
-### 像素白
+### Pixel White
 
-这是额外主题，不替换已有两套主题。rc.24 将原先大面积亮黄的通用表面改为淡灰绿，辅助轨道使用浅薄荷色；背景改为中性浅色，去掉原先的蓝紫偏色。莓红用于选中动作和主强调，湖蓝用于秒表及语音类图标，橙色用于收音机与其图标，绿色用于成功及相应应用图标。主次文字使用中性深灰，应用选择页的电量框和联网信号也使用正文色。色彩主要落在内容与状态，分隔线和顶栏降低饱和度；不增加装饰对象、字体或贴图。
+This is an additional theme and does not replace the two existing ones. rc.24 changed the large bright-yellow generic surface to pale gray-green, made auxiliary tracks light mint, and changed the background to a neutral light tone, removing the earlier blue-violet cast. Raspberry marks the selected action and primary accent, lake blue is used for the Stopwatch and voice-type icons, orange for Radio and its icon, and green for success and the matching app icons. Primary and secondary text use neutral dark gray; the battery frame and network signal on the app selection page also use the body text color. Color lands mainly on content and status, while dividers and the top bar are desaturated; no decorative objects, fonts or textures are added.
 
-首页的 A8 人像与夜景素材把亮部记录为不透明像素，需要深色底保留原有明暗关系。多彩首页使用 `#181B1C` 深底、`#F1EEE6` 人像、`#8DDFC5` 底图、`#86C9FF` 时钟、`#FFAD78` 温度和 `#F58FAA` 天气短语。rc.24 起顶栏与页面深底相同，正文为 `#E9EDEB`、次文字为 `#AFBDB7`、分隔线为 `#53605D`；信号和电池框使用浅色，电池填充依照深色场景的成功、警告和危险色变化。深色角色集中维护在 `ui_pixel.c::s_playful_dark`，由 `ui_theme_color_on_dark()` 读取，原主题在该 API 下仍返回原 palette。人像与夜景原图、布局、上传数据保持原样。
+The A8 portrait and night-scene assets on Home record highlights as opaque pixels, so they need a dark base to keep their original light and shade. The colorful Home uses a `#181B1C` dark base, `#F1EEE6` portrait, `#8DDFC5` base art, `#86C9FF` clock, `#FFAD78` temperature and `#F58FAA` weather phrase. From rc.24 the top bar matches the dark page base, body text is `#E9EDEB`, secondary text `#AFBDB7` and dividers `#53605D`; the signal and battery frame use a light color, and the battery fill changes with the success, warning and danger colors of the dark scene. The dark roles are maintained in `ui_pixel.c::s_playful_dark` and read via `ui_theme_color_on_dark()`; the original themes still return their original palette through that API. The original portrait and night-scene art, layout and uploaded data are unchanged.
 
-`UI_SECONDARY` / `UI_TERTIARY` 为两种补充强调色，经典绿与旅行主题均映射回原强调色。浅色主题中的 `UI_INK` 是深墨色，与选中项上的白字 `UI_ON_ACCENT` 分开。状态色仍保留成功、警示、危险的含义。深色游戏场景继续使用场景自己的浅色说明与旗杆，不能直接继承浅色主题的深色正文。
+`UI_SECONDARY` / `UI_TERTIARY` are two supplementary accent colors; Classic Green and Travel both map them back to their original accent. `UI_INK` in the light theme is a dark ink color, kept separate from the white `UI_ON_ACCENT` text on selected items. Status colors keep their success, warning and danger meanings. Dark game scenes keep using their own light captions and flagpole, and must not directly inherit the dark body text of the light theme.
 
-设置页按经典绿 → 旅行仪器 → 像素白 → 霓虹黑循环；像素白内部仍为 `UI_THEME_PLAYFUL`，NVS 值 0、1、2 保持原义，霓虹黑为 3，恢复默认仍使用经典绿。
+The Settings page cycles Classic Green -> Travel Instrument -> Pixel White -> Neon Black. Pixel White is still `UI_THEME_PLAYFUL` internally, the NVS values 0, 1, 2 keep their original meaning, Neon Black is 3, and restoring defaults still uses Classic Green.
 
-### 霓虹黑
+### Neon Black
 
-rc.26 新增独立暗色主题。近黑画布贯穿首页与顶栏，浅色人像保持原始亮部蒙版；时钟为电青色、夜景为荧光粉、温度为琥珀色、天气短语为酸橙色。应用图标使用功能色与双色细节，秒表主数字使用荧光粉。全机正文使用中性白与冷灰。
+rc.26 adds a standalone dark theme. A near-black canvas runs through Home and the top bar, light portraits keep their original highlight mask; the clock is electric cyan, the night scene fluorescent pink, the temperature amber and the weather phrase lime. App icons use functional colors with two-tone details, and the Stopwatch main digits use fluorescent pink. Body text across the device uses neutral white and cool gray.
 
-rc.27 起共享顶栏和底部分隔线统一为 1px 连续冷灰线（`UI_BORDER`），去掉造成断续观感的电青、荧光粉短段。顶栏分隔线横贯屏宽，底部分隔线沿用左右各 12px 的内容内边距。应用图标外侧保留错开的短笔画，设置选中条在左上、右下各切去 6px 阶梯角。图标与选中条的绘制复用现有对象的 draw 回调，不添加常驻动画、帧缓冲、图片或字体。三套已有主题继续使用原有颜色、布局与绘制结果。`ui_theme_is_multicolor()` 仅用于两套彩色主题的辅助色与应用图标；像素白专属的深色场景和深墨色映射保持独立。
+From rc.27 the shared top bar and bottom divider are a uniform 1px continuous cool-gray line (`UI_BORDER`), dropping the short cyan and fluorescent pink segments that made the line look broken. The top divider spans the full screen width, and the bottom divider keeps the 12px content inset on each side. App icons keep offset short strokes on the outside, and the Settings selection bar has 6px stepped corners cut at the top-left and bottom-right. Icons and the selection bar are drawn in the draw callbacks of existing objects, with no permanent animation, framebuffer, image or font added. The three existing themes keep their original colors, layout and rendering. `ui_theme_is_multicolor()` is used only for the auxiliary colors and app icons of the two colorful themes; the dark-scene and dark-ink mappings specific to Pixel White stay independent.
 
 ## Typography
 
-中文正文使用 `buddy_font_16`，共享标题使用 `ui_font_20`，两者均为 Source Han Sans SC 的 LVGL 字体子集；上方行高来自实际字体结构。它们不是浏览器可直接加载的 webfont。正文默认字距取 `UI_LS_BODY`；共享 title plate 单独使用 `UI_LS_TITLE`（1px），声音跳一跳覆盖面板没有调用 title plate，不继承该字距。
+Body text uses `buddy_font_16` and shared titles use `ui_font_20`; both are LVGL font subsets of Source Han Sans SC, and the line heights above come from the actual font structure. They are not webfonts a browser can load directly. Body text uses the default letter spacing `UI_LS_BODY`; the shared title plate uses `UI_LS_TITLE` (1px) on its own, and the Sound Jump overlay panel does not call the title plate, so it does not inherit that spacing.
 
-数字标签使用 Montserrat 14px。秒表的大数字使用 32px，小时长度变长后缩至 Montserrat 20px。不要由这些应用用法推导完整的全机字号比例。中文文案变化需核对对应子集字形覆盖。
+Numeric labels use Montserrat 14px. The large Stopwatch digits use 32px, dropping to Montserrat 20px when the hour length grows. Do not derive a full device-wide type scale from these app usages. When UI text changes, check the glyph coverage of the corresponding font subset.
 
 ## Layout
 
-共享构件以 240×320 屏幕定位，顶栏高 26px。电量百分比占 x=160–201，图标占 x=206–232；其余顶栏内容截止于 x=155，至少留 4px 间隔。应用选择页时间使用 x=92、宽 56px 的居中槽位，中心与屏幕 x=120 一致。顶栏文字通过 `ui_pixel_status_text_align()` 按字体行高在分隔线上方的 25px 区域居中，电量文字按电池图标的垂直中心定位。共享 title plate 与 footer 内容宽 216px、左右各 12px；秒表正文使用左右各 16px。这是并存的现有用法，未抽象出统一间距网格或响应式断点。
+Shared components are positioned for a 240x320 screen with a 26px top bar. The battery percentage occupies x=160-201 and the icon x=206-232; the remaining top bar content ends at x=155, leaving at least a 4px gap. The time on the app selection page uses a centered slot at x=92, 56px wide, centered on screen x=120. Top bar text is centered by `ui_pixel_status_text_align()` within the 25px area above the divider according to the font line height, and the battery text is positioned on the vertical center of the battery icon. The shared title plate and footer content are 216px wide with 12px on each side; Stopwatch body text uses 16px on each side. These are existing coexisting usages; no unified spacing grid or responsive breakpoints have been abstracted.
 
-共享 footer 有两行：当前操作与次级导航。声音跳一跳继承该信息顺序，但根据场景高度自行定位；其 189px 游戏区、进度和蓄力条属于应用布局，具体说明见 `docs/sound-jump.md`。
+The shared footer has two lines: the current action and secondary navigation. Sound Jump inherits that information order but positions itself according to the scene height; its 189px game area, progress and charge bar belong to the app layout, described in `docs/sound-jump.md`.
 
 ## Elevation & Depth
 
-所检查的共享背景、顶栏、面板和秒表构件通过表面色、细边界与留白分层，没有显式阴影样式。声音跳一跳在场景内用几何层叠表现浮岛厚度，不把它登记为通用 elevation token。
+The shared backgrounds, top bar, panels and Stopwatch components that were checked separate layers through surface color, thin borders and whitespace, with no explicit shadow styles. Sound Jump uses geometric layering inside the scene to show the thickness of the floating island, and does not register it as a general elevation token.
 
 ## Shapes
 
-共享 `block()`、背景与面板为零圆角。经典主题的普通面板默认有 1px 边框，旅行主题默认无边框；调用方可显式覆盖。title plate 在经典主题为完整边框，旅行主题只保留下边线。不能把无边框写成全局禁令。
+Shared `block()`, backgrounds and panels have zero corner radius. Ordinary panels in the Classic theme have a 1px border by default, Travel has none by default; callers can override this explicitly. The title plate has a full border in Classic and only a bottom line in Travel. Borderless must not be written as a global rule.
 
 ## Components
 
-- **顶栏：** `ui_pixel_top_bar()` 使用表面色与 1px 下边线，容纳应用名及状态。
-- **面板：** `ui_pixel_panel_create()` 使用调用方传入的语义表面色与共享内边距；选中且可用时 `ui_pixel_set_selected()` 切换至较亮表面与强调色边界。
-- **首页：** 左侧人像、姓名和签名，右侧时钟、日期和天气，底部保留原像素艺术区。去掉外框和人像内框；长姓名/签名单行截断，天气说明拓宽。不将人像或资料移到全宽的新布局。
-- **应用选择：** 无大卡片或图标框；中央是当前图标和名称，上下露出相邻应用名，只保留一个位置数字，不加小字介绍。
-- **按键说明：** 工具页底部使用 272px 分隔线，主要动作位于 276px，返回说明位于 298px。语音页明确上键按住说话、下键回车。说明提示实体按键，不是触屏按钮。
-- **语音与小智：** 语音正文固定为“AI语音输入”，以真实连接状态、收音和时长更新；音频通道未就绪时给出 CABLE Output / CABLE Input 选择路径。Wi-Fi 信号来自实际站点连接与 RSSI，与电脑转发器连接状态分开显示。小智使用共享顶栏和双行按键说明，空闲提示居中，交谈时正文左对齐并滚动到最新回复；状态行和正文不加外框，上下键只调音量。
-- **收音机与秒表：** 收音机保留刻度和真实音柱，音量为短时反馈；秒表突出主时间，百分秒降一级，未记段时不显示占位行。
-- **游戏：** 声音跳一跳预备页放大 Claude 角色，游戏碰撞尺寸不变。狗游戏保留进页自动开始，失败突出分数和再来；俄罗斯方块保留完整 20 行棋盘，减少教程和次要统计。
-- **电池与信号：** 共享实现使用几何块。电池百分比固定单行右对齐，给 `100%` 留足空间；电量 0–15 使用危险色、16–35 使用警示色、36–100 使用成功色，未知值显示 `--`。零电量和未知值不显示填充；不要用假测量值装饰应用。
-- **设置焦点：** 设置页当前行使用强调色底与 `UI_ON_ACCENT` 文字，恢复默认的待确认行使用危险色。确认前写明“再次确定”，上下键可取消。
-- **操作动效：** 应用选择使用 140ms、6px 的图标纵向反馈，文字保持静止；设置焦点使用 140ms 背景渐显。连续操作会取消同对象旧动画，不叠加往返或循环动画。
-- **切换：** 继续保留上一画面，目标页面准备好后显示；不添加“正在返回”“正在打开”、空白过渡屏或全屏淡出。
-- **静止页面：** 电池、信号和连接点颜色在值变化时才更新；收音机音量柱保留 20Hz 更新机会，时钟与睡眠计时文案按 1Hz 更新。
-- **局部游戏画面：** 声音跳一跳复用背景、顶栏、面板和字体，角色、平台、音符及轨迹由 LVGL 几何绘制。场景中的固定色不随系统主题变更；这是应用边界，不是共享主题的新规则。
+- **Top bar:** `ui_pixel_top_bar()` uses the surface color and a 1px bottom line, and holds the app name and status.
+- **Panel:** `ui_pixel_panel_create()` uses the semantic surface color passed by the caller and the shared inner padding; when selected and enabled, `ui_pixel_set_selected()` switches to a brighter surface and the accent border.
+- **Home:** portrait, name and signature on the left; clock, date and weather on the right; the original pixel-art area stays at the bottom. The outer frame and portrait inner frame are removed; long names and signatures are truncated to a single line and the weather description is widened. The portrait and profile are not moved to a new full-width layout.
+- **App selection:** no large cards or icon frames; the current icon and name are in the center, adjacent app names show above and below, and only one position number is kept, with no small description text.
+- **Key hints:** tool pages use a 272px divider at the bottom, the main action at 276px and the back hint at 298px. The voice page states explicitly: hold Up to speak, Down for Enter. Hints point to the physical buttons; they are not touch buttons.
+- **Voice and Xiaozhi:** the voice body is fixed to "AI Voice input" and updates with the real connection state, recording and duration; when the audio channel is not ready, it gives the CABLE Output / CABLE Input selection path. The Wi-Fi signal comes from the actual station connection and RSSI, and is shown separately from the PC relay connection state. Xiaozhi uses the shared top bar and two-line key hints; the idle hint is centered, and during a conversation the body is left-aligned and scrolls to the latest reply; the status line and body have no outer frame, and Up/Down only adjust volume.
+- **Radio and Stopwatch:** Radio keeps the scale and the real level bars, with volume as brief feedback; Stopwatch highlights the main time, centiseconds drop one size, and no placeholder row is shown when no split is recorded.
+- **Games:** the Sound Jump ready page enlarges the Claude character without changing the game collision size. Bark Battle keeps auto-start on entering the page, and failure highlights the score and play again; Tetris keeps the full 20-row board and cuts tutorial text and secondary stats.
+- **Battery and signal:** the shared implementation uses geometric blocks. The battery percentage is fixed to a single right-aligned line with enough room for `100%`; levels 0-15 use the danger color, 16-35 the warning color and 36-100 the success color, and unknown values show `--`. Zero and unknown values show no fill; do not decorate apps with fake measured values.
+- **Settings focus:** the current row on the Settings page uses an accent background with `UI_ON_ACCENT` text, and the row pending confirmation for restore defaults uses the danger color. Before confirming it says "Press again to confirm", and Up/Down cancels.
+- **Interaction motion:** app selection uses a 140ms, 6px vertical icon feedback while the text stays still; Settings focus uses a 140ms background fade-in. Continuous input cancels the old animation on the same object, with no back-and-forth or looping animations stacked.
+- **Transitions:** keep the previous screen and show the target page once ready; do not add "returning" or "opening" messages, blank transition screens or full-screen fades.
+- **Static pages:** battery, signal and connection-dot colors update only when values change; the Radio volume bar keeps a 20Hz update opportunity, and the clock and sleep timer text update at 1Hz.
+- **Local game scenes:** Sound Jump reuses the background, top bar, panel and fonts; the character, platforms, notes and trajectory are drawn with LVGL geometry. Fixed colors in the scene do not change with the system theme; this is an app boundary, not a new rule of the shared theme.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** 通过现有 UI 语义角色读取主题颜色，并保留三套主题的差异。
-- **Do** 在实际 240×320 渲染中核对文字覆盖、截断和按键提示。
-- **Do** 将游戏场景的构图、色彩及动画限定在应用文档中。
+- **Do** read theme colors through the existing UI semantic roles, and keep the differences between the themes.
+- **Do** check text coverage, truncation and key hints in actual 240x320 rendering.
+- **Do** keep game scene composition, color and animation limited to the app documents.
 
 ### Don't:
-- **Don't** 将秒表或游戏的局部尺寸提升为全机布局规范。
-- **Don't** 将字体子集当作可覆盖任意中文的完整字体。
-- **Don't** 将 synthetic fixture 图集描述成实机交互、麦克风体验或显示屏验证。
+- **Don't** promote local Stopwatch or game dimensions to a device-wide layout standard.
+- **Don't** treat a font subset as a complete font that covers arbitrary text.
+- **Don't** describe synthetic fixture atlases as on-device interaction, microphone experience or display verification.

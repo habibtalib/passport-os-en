@@ -1,6 +1,6 @@
-// main/boot_chime.c —— 复古开机音:方波琶音 E5-G5-B5-E6(约 0.55s)。
-// 合成参数是"手感"调的:每音 60% 线性衰减 + 15ms 静音分音,典型 8-bit 开机味。
-// 播放走专用短命任务;结束时 bsp_audio_deinit() 归还全部音频内存。
+// main/boot_chime.c - retro boot sound: square-wave arpeggio E5-G5-B5-E6 (about 0.55s).
+// Synthesis parameters are tuned by ear: each note decays linearly by 60% + 15ms silent gap, classic 8-bit boot feel.
+// Playback runs in a dedicated short-lived task; on finish bsp_audio_deinit() returns all audio memory.
 #include "boot_chime.h"
 
 #include "bsp_audio.h"
@@ -16,15 +16,15 @@
 static const char *TAG = "boot_chime";
 static atomic_bool s_busy;
 
-#define CHIME_HZ     16000          // 与语音/游戏应用的默认格式一致
-#define CHIME_AMP    7000           // ~21% 满幅:主音量 80% 下足够清晰不刺耳
-#define NOTE_BUF_N   1600           // 100ms @16kHz(任务栈放不下,临时堆分配)
+#define CHIME_HZ     16000          // same format as the voice/game apps default
+#define CHIME_AMP    7000           // ~21% full scale: clear but not harsh at 80% master volume
+#define NOTE_BUF_N   1600           // 100ms @16kHz (does not fit on the task stack, heap-allocated temporarily)
 
-// 2026-09-13:原为 3.2KB .bss 常驻。开机铃只响 0.55s,却永久占着内部 DRAM ——
-// 而 C3 堆里这块连续内存正是小智 Opus 编码器(~25KB 连续块)能不能开出来的
-// 关键。改为 chime 任务内 malloc、用完即 free。
+// 2026-09-13: this used to be a permanent 3.2KB .bss. The boot chime plays only 0.55s yet permanently held internal DRAM -
+// and this contiguous block in the C3 heap decides whether the Xiaozhi Opus encoder (~25KB contiguous block) can be opened at all.
+// Changed to malloc inside the chime task and free after use.
 
-// 方波 + 线性衰减包络(衰到 40%):比恒幅方波更" electronic start"而不是警报
+// Square wave + linear decay envelope (decays to 40%): sounds more like an "electronic start" than a constant-amplitude square wave, which sounds like an alarm
 static void synth_square(int16_t *note, int samples, int hz) {
     const float step = (float)hz / CHIME_HZ;
     float phase = 0.0f;
@@ -45,7 +45,7 @@ static void play_note(int16_t *note, int hz, int ms) {
         if (bsp_audio_write(note, n * sizeof(int16_t)) != ESP_OK) return;
         done += n;
     }
-    // 15ms 静音分音,让每个音"颗粒分明"
+    // 15ms silent gap so each note is distinct
     memset(note, 0, CHIME_HZ * 15 / 1000 * sizeof(int16_t));
     bsp_audio_write(note, CHIME_HZ * 15 / 1000 * sizeof(int16_t));
 }
@@ -71,7 +71,7 @@ static void chime_task(void *arg) {
     }
     bsp_audio_set_volume(70);
 
-    // 经典上升琶音,尾音拉长收束
+    // Classic rising arpeggio, last note held longer to close
     static const struct { int hz, ms; } seq[] = {
         {659, 85}, {784, 85}, {988, 85}, {1319, 260},
     };
@@ -79,7 +79,7 @@ static void chime_task(void *arg) {
         play_note(note, seq[i].hz, seq[i].ms);
     }
 
-    // 尾音余韵:让 DMA 把最后一块送完再拆,避免"咔"声
+    // Tail ring-out: let DMA flush the last block before teardown, avoiding a click
     vTaskDelay(pdMS_TO_TICKS(80));
     bsp_audio_deinit();
     free(note);

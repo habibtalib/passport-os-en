@@ -1,28 +1,28 @@
 #pragma once
 
-// 小智音频服务：ES8311 半双工录音 / 播放。
+// Xiaozhi audio service: ES8311 half-duplex recording / playback.
 //
-// 线程模型（这是修复闪退的核心）：
-//   * websocket 任务只调用 PushIncomingAudio()：写环形缓冲，绝不解码或操作
-//     codec；队列满时最多等待 300ms，让 TCP 背压吸收突发。
-//   * 一条常驻工作线程 xzg_audio 承担"录音编码"和"播放解码"两种模式。两种模式
-//     天然互斥（半双工），所以共用一份大栈就够了 —— Opus 编解码器都用栈上临时
-//     缓冲，实测编码需 ~19KB、解码需 >6KB，在 ~90KB 堆上各开一条大栈根本放不下。
-//   * Start*/Stop* 生命周期接口必须在同一条任务（控制任务）里调用；内部用递归锁
-//     保护，且任何等待都有明确上界，永远不会无限期挂住调用者。
+// Threading model (the core of the crash fix):
+//   * The websocket task only calls PushIncomingAudio(): it writes the ring buffer and never decodes or touches the
+//     codec; when the queue is full it waits at most 300ms, letting TCP backpressure absorb the burst.
+//   * One resident worker thread xzg_audio handles both "record encode" and "playback decode" modes. The two modes
+//     are naturally mutually exclusive (half-duplex), so one shared large stack is enough -- the Opus codecs use stack
+//     temporary buffers, measured ~19KB for encoding and >6KB for decoding; a separate large stack for each simply does not fit in a ~90KB heap.
+//   * The Start*/Stop* lifecycle interfaces must be called from the same task (the control task); a recursive lock inside
+//     protects them, and every wait has a clear upper bound, so the caller is never hung indefinitely.
 //
-// 与旧实现的关键差异：
-//   1. 旧 StopRecording() 用 `while (handle) vTaskDelay(10)` 无界自旋：录音任务一旦
-//      卡在 portMAX_DELAY 的 I2S 读里，调用者就永久挂起，进而让
-//      esp_websocket_client_stop() 的 portMAX_DELAY 等待也永不返回 → 看门狗复位。
-//      现在所有等待都有上限，超时只记日志并继续收尾。
-//   2. 旧实现从 websocket 任务里直接 StartPlayback()/StopRecording()，与录音任务、
-//      按键任务并发操作同一个 codec 句柄（esp_codec_dev_open/close 非线程安全）
-//      → 随机崩溃（真机已复现："AI 说话时按 OK 打断"必然重启）。现在 codec 生命周期
-//      只在控制任务里发生。
-//   3. 旧实现每帧都在网络任务里同步解码 + 写 I2S，直接阻塞网络收发。
-//   4. 录音线程不再自己发网络包：mbedTLS 的 ssl_write 很吃栈，发送改由控制任务做，
-//      既省栈，也让协议对象只被一条任务访问。
+// Key differences from the old implementation:
+//   1. The old StopRecording() spun unboundedly with `while (handle) vTaskDelay(10)`: once the recording task
+//      got stuck in an I2S read with portMAX_DELAY, the caller hung forever, and in turn the portMAX_DELAY wait of
+//      esp_websocket_client_stop() never returned -> watchdog reset.
+//      Now every wait has a limit; on timeout it only logs and continues wrapping up.
+//   2. The old implementation called StartPlayback()/StopRecording() directly from the websocket task, operating the same codec handle
+//      concurrently with the recording task and the key task (esp_codec_dev_open/close is not thread-safe)
+//      -> random crashes (reproduced on device: "press OK to interrupt while the AI is speaking" always rebooted). Now the codec lifecycle
+//      happens only in the control task.
+//   3. The old implementation decoded + wrote I2S synchronously in the network task for every frame, directly blocking network I/O.
+//   4. The recording thread no longer sends network packets itself: mbedTLS ssl_write is stack-hungry, so sending is done by the control task,
+//      saving stack and also letting the protocol object be accessed by one task only.
 
 #include <cstdint>
 #include <cstddef>
@@ -35,13 +35,13 @@
 
 namespace xiaozhi {
 
-// 编码：60ms @ 16kHz 单声道 16bit（1920 字节 PCM → ~240 字节 Opus）
+// Encoding: 60ms @ 16kHz mono 16bit (1920 bytes PCM -> ~240 bytes Opus)
 constexpr size_t kEncPcmFrameBytes = 1920;
 constexpr int kEncFrameDurationMs = 60;
 
 constexpr size_t kOpusFrameMaxBytes = 512;
-// 解码：服务端下发 24kHz/60ms 单声道 PCM 为 2880 字节。
-// 对齐官方 folo-ai-passport-xiaozhi，硬件原生 24kHz 输出，无需升采样。
+// Decoding: server-sent 24kHz/60ms mono PCM is 2880 bytes.
+// Aligned with the official folo-ai-passport-xiaozhi: hardware-native 24kHz output, no upsampling needed.
 constexpr size_t kMaxPcmFrameBytes = 2880;
 
 class AudioService {
@@ -52,22 +52,22 @@ public:
     static void RequestStop();
 
     esp_err_t Init();
-    // 应用退出时调用：停掉一切、销毁常驻工作线程、把缓冲还给堆。
-    // 这样切到别的 App 时机器内存不会被小智占着（多 App 共存的前提）。
+    // Called on app exit: stop everything, destroy the resident worker thread, and return buffers to the heap.
+    // So memory is not held by Xiaozhi after switching to another app (a prerequisite for multi-app coexistence).
     bool Deinit();
 
-    // ---- websocket 任务调用：有界背压，持续满则丢弃 ----
+    // ---- Called from the websocket task: bounded backpressure, drop if persistently full ----
     void PushIncomingAudio(const uint8_t *opus_data, size_t len);
 
-    // ---- 控制任务调用：录音生命周期 ----
+    // ---- Called from the control task: recording lifecycle ----
     //
-    // 编码器"提前 open、常驻复用"（2026-09-13 修复）：
-    // 真机实测最容易拿到大块连续内存的时刻是 AudioService::Init()（此时
-    // largest 约 30KB）；等到按下说话时堆已被 websocket/TLS 与 UI 打散，
-    // largest 只剩 15-22KB，而 esp_opus_enc_open 需要约 25KB 连续块，
-    // 必然失败（ESP_OPUS_ENC: Opus encoder init failed. ret:-7）。
-    // 因此在 Init() 就把编码器开好常驻，StopRecording() 不再关它。
-    // 播放解码器在 Init 中同步预留，普通轮次和重连都复用。
+    // The encoder is "opened early and kept resident for reuse" (fixed 2026-09-13):
+    // On device, the moment when a large contiguous block is easiest to get is AudioService::Init() (largest is
+    // about 30KB then); by the time talk is pressed the heap has been fragmented by websocket/TLS and the UI,
+    // largest is only 15-22KB, while esp_opus_enc_open needs a contiguous block of about 25KB,
+    // and so it always fails (ESP_OPUS_ENC: Opus encoder init failed. ret:-7).
+    // Therefore the encoder is opened and kept resident in Init(), and StopRecording() no longer closes it.
+    // The playback decoder is reserved synchronously in Init and reused for normal turns and reconnects.
     bool EnsureEncoder();
 
     // Server hello confirms sample rate, then allocates the small session rings.
@@ -80,18 +80,18 @@ public:
     void StopRecording();
     bool IsRecording() const { return is_recording_; }
 
-    // ---- 控制任务调用：取出已编码的音频帧并发送 ----
+    // ---- Called from the control task: fetch encoded audio frames and send ----
     bool PopEncodedFrame(uint8_t *out, size_t out_cap, size_t *out_len);
     bool HasPendingEncoded() const;
     void ResetEncodedQueue();
 
-    // ---- 控制任务调用：播放生命周期 ----
+    // ---- Called from the control task: playback lifecycle ----
     void SetPlaybackSampleRate(int hz);
     int GetPlaybackSampleRate() const { return playback_rate_; }
 
     bool StartPlayback();
-    void StopPlayback();    // 播完缓冲剩余音频再停（正常 tts stop）
-    void AbortPlayback();   // 立刻丢弃缓冲并停止（打断 / 退出应用）
+    void StopPlayback();    // play out the remaining buffered audio, then stop (normal tts stop)
+    void AbortPlayback();   // discard the buffer and stop immediately (interrupt / app exit)
     bool IsPlaying() const { return is_playing_; }
     bool HasPendingPlayback() const;
     uint32_t PlaybackProgress() const { return playback_progress_.load(); }
@@ -115,7 +115,7 @@ private:
     bool OpenDecoder();
     std::atomic<uint32_t> playback_progress_{0};
 
-    // 通用字节环形缓冲（存 [u16 len][payload] 记录）
+    // Generic byte ring buffer (stores [u16 len][payload] records)
     struct Ring {
         uint8_t *buf;
         size_t cap;
@@ -137,12 +137,12 @@ private:
 
     void *opus_enc_handle_{nullptr};
     void *opus_dec_handle_{nullptr};
-    int opus_dec_rate_{0};                  // 当前解码器使用的采样率
+    int opus_dec_rate_{0};                  // sample rate used by the current decoder
 
     std::atomic<bool> is_recording_{false};
     std::atomic<bool> is_playing_{false};
-    std::atomic<bool> play_stop_{false};    // 硬停：立刻退出
-    std::atomic<bool> play_drain_{false};   // 软停：播完缓冲再退出
+    std::atomic<bool> play_stop_{false};    // hard stop: exit immediately
+    std::atomic<bool> play_drain_{false};   // soft stop: play out the buffer, then exit
 
     // Reserve the current service default before TLS; reconcile with hello
     // before accepting any audio if a server negotiates a different rate.
@@ -154,8 +154,8 @@ private:
     // Shared 2880 B PCM holds either 1920 B recording or 2880 B playback.
     uint8_t *pcm_scratch_{nullptr};
 
-    TaskHandle_t worker_task_{nullptr};  // 常驻：录音/播放共用一条
-    StackType_t *worker_stack_{nullptr}; // 借用与收音机互斥的固定工作区
+    TaskHandle_t worker_task_{nullptr};  // resident: one task shared by recording/playback
+    StackType_t *worker_stack_{nullptr}; // borrows the fixed work area that is mutually exclusive with the radio
     StaticTask_t worker_tcb_{};
     std::atomic<Work> work_{Work::Idle};
     std::atomic<bool> worker_quit_{false};
@@ -168,10 +168,10 @@ private:
     StaticSemaphore_t sync_storage_[6]{};
     bool bsp_owned_{false};
 
-    // 播放环形缓冲 3072 ≈ 12~15 个 Opus 帧 ≈ 0.8 秒余量。配合短时 TCP 背压
-    // (PushIncomingAudio 中 300ms 有界等待)吸收常见突发；持续满仍会丢帧。
-    // 将容量从 8KB 收紧至 3KB，直接向系统堆归还 5120 字节内部 SRAM，确保
-    // 录音栈与 Opus 编码器能顺利拿到连续内存。
+    // Playback ring buffer 3072 ~= 12-15 Opus frames ~= 0.8 s of margin. Together with short TCP backpressure
+    // (the 300ms bounded wait in PushIncomingAudio) it absorbs common bursts; frames are still dropped if persistently full.
+    // Shrinking the capacity from 8KB to 3KB returns 5120 bytes of internal SRAM directly to the system heap, ensuring
+    // the recording stack and Opus encoder can get contiguous memory.
     static constexpr size_t kPlayRingCap = 3072;
     uint8_t *play_ring_buf_{nullptr};
     Ring play_ring_{};

@@ -39,7 +39,7 @@ std::atomic<bool> s_active{false}, s_exit{false}, s_pressed{false}, s_cancel{fal
 std::atomic<bool> s_confirm{false}, s_pair_done{false}, s_refresh{false};
 std::atomic<bool> s_connected_event{false};
 std::atomic<bool> s_prepare_event{false};
-std::atomic<const char *> s_connect_detail{"正在重新连接"};
+std::atomic<const char *> s_connect_detail{"Reconnecting"};
 std::atomic<bool> s_repair{false};
 std::atomic<bool> s_paired{false};
 std::atomic<uint32_t> s_pairing_prompt_generation{0};
@@ -57,22 +57,22 @@ void view(passport_muse_stage_t stage, const char *detail) {
     portEXIT_CRITICAL(&s_lock);
 }
 const char *voice_error_detail(const char *reason) {
-    if (strstr(reason, "NOT READY")) return "Muse 还未就绪，请稍后重试";
-    if (strstr(reason, "QUEUE BUSY")) return "语音发送繁忙，请稍后重试";
-    if (strstr(reason, "SERVER ERROR")) return "Muse 服务异常，请稍后重试";
-    if (strstr(reason, "REQUEST ERROR")) return "Muse 未接受请求，按确定键重连";
-    if (strstr(reason, "INVALID RESPONSE")) return "Muse 回复解析失败，请重试";
-    if (strstr(reason, "PROTOCOL ERROR")) return "Muse 数据处理失败，请重连";
-    if (strstr(reason, "REPLY OUT OF MEMORY")) return "接收内存不足，请返回重试";
-    if (strstr(reason, "OUT OF MEMORY")) return "录音内存不足，松开上键后重试";
-    if (strstr(reason, "CAN'T KEEP UP")) return "语音上传中断，检查网络后重试";
-    if (strstr(reason, "SYNC INTERRUPTED")) return "回复同步中断，按确定键重连";
-    if (strstr(reason, "NO REPLY")) return "回复超时，可在手机 Muse 查看";
-    if (strstr(reason, "REPLY EVENT TOO LARGE")) return "回复数据过大，请在手机查看";
-    if (strstr(reason, "BUFFER LIMIT")) return "回复缓存已满，请在手机查看";
-    if (strstr(reason, "REPLY TOO LONG")) return "回复较长，请在手机 Muse 查看";
-    if (strstr(reason, "AUTH") || strstr(reason, "DENIED")) return "Muse 授权异常，按确定键重连";
-    return "Muse 连接中断，检查网络后重试";
+    if (strstr(reason, "NOT READY")) return "Muse not ready, retry later";
+    if (strstr(reason, "QUEUE BUSY")) return "Voice send busy, retry later";
+    if (strstr(reason, "SERVER ERROR")) return "Muse service error, retry later";
+    if (strstr(reason, "REQUEST ERROR")) return "Muse refused request, OK: reconnect";
+    if (strstr(reason, "INVALID RESPONSE")) return "Muse reply parse failed, retry";
+    if (strstr(reason, "PROTOCOL ERROR")) return "Muse data error, reconnect";
+    if (strstr(reason, "REPLY OUT OF MEMORY")) return "Low memory, go back and retry";
+    if (strstr(reason, "OUT OF MEMORY")) return "Rec memory low, release Up, retry";
+    if (strstr(reason, "CAN'T KEEP UP")) return "Upload interrupted, check network";
+    if (strstr(reason, "SYNC INTERRUPTED")) return "Reply sync lost, OK: reconnect";
+    if (strstr(reason, "NO REPLY")) return "Reply timed out, view in phone Muse";
+    if (strstr(reason, "REPLY EVENT TOO LARGE")) return "Reply too large, view on phone";
+    if (strstr(reason, "BUFFER LIMIT")) return "Reply buffer full, view on phone";
+    if (strstr(reason, "REPLY TOO LONG")) return "Long reply, view in phone Muse";
+    if (strstr(reason, "AUTH") || strstr(reason, "DENIED")) return "Muse auth error, OK: reconnect";
+    return "Muse link lost, check network";
 }
 void pairing_view(passport_muse_stage_t stage, const char *detail, uint32_t generation) {
     portENTER_CRITICAL(&s_lock);
@@ -87,7 +87,7 @@ void recover_pairing_prompt(uint32_t generation) {
         (s_view.stage == PASSPORT_MUSE_CONFIRM || s_view.stage == PASSPORT_MUSE_PHONE_SETUP)) {
         s_pairing_prompt_generation = 0;
         s_view.stage = PASSPORT_MUSE_PAIRING;
-        strlcpy(s_view.detail, "手机 Muse / 设置 / 设备", sizeof(s_view.detail));
+        strlcpy(s_view.detail, "Phone Muse / Settings / Devices", sizeof(s_view.detail));
     }
     portEXIT_CRITICAL(&s_lock);
 }
@@ -111,7 +111,7 @@ void status(const char *state) {
     if (s_exit) return;
     if (!strcmp(state, "ws_prepare")) s_prepare_event = true;
     else if (!strcmp(state, "ws_connected")) {
-        s_connect_detail = "正在重新连接";
+        s_connect_detail = "Reconnecting";
         s_connected_event = true;
     }
     else if (!strcmp(state, "ws_auth_failed") || !strcmp(state, "ws_refresh_needed")) s_refresh = true;
@@ -120,26 +120,26 @@ void status(const char *state) {
         view(PASSPORT_MUSE_CONNECTING, s_connect_detail.load());
     }
     else if (!strcmp(state, "ws_registration_failed") || !strcmp(state, "ws_registration_timeout")) {
-        s_connect_detail = "Muse 注册失败，正在重连";
+        s_connect_detail = "Muse register failed, retrying";
         view(PASSPORT_MUSE_CONNECTING, s_connect_detail.load());
     }
     else if (!strcmp(state, "ws_tls_failed")) {
-        s_connect_detail = "安全连接失败，正在重连";
+        s_connect_detail = "Secure link failed, retrying";
         view(PASSPORT_MUSE_CONNECTING, s_connect_detail.load());
     }
     else if (!strcmp(state, "ws_server_failed")) {
-        s_connect_detail = "Muse 服务异常，正在重连";
+        s_connect_detail = "Muse service error, retrying";
         view(PASSPORT_MUSE_CONNECTING, s_connect_detail.load());
     }
     else if (!strcmp(state, "ws_memory_failed")) {
-        s_connect_detail = "内存不足，正在重连";
+        s_connect_detail = "Low memory, retrying";
         view(PASSPORT_MUSE_CONNECTING, s_connect_detail.load());
     }
     else if (!strcmp(state, "ws_unpaired")) {
         config_clear_pairing();
         s_paired = false;
         s_exit = true;
-        view(PASSPORT_MUSE_ERROR, "请在 Muse 中重新配对");
+        view(PASSPORT_MUSE_ERROR, "Re-pair in Muse");
     }
 }
 void agent_name(const char *name) {
@@ -194,7 +194,7 @@ void device_info() {
 void finished(uint32_t generation) {
     if (s_exit || !link_pairing_session_is_current(generation)) return;
     if (ble_server_send_pairing_status("confirm_required", generation) &&
-        link_pairing_arm_confirmation(generation)) pairing_view(PASSPORT_MUSE_CONFIRM, "按确定键允许配对", generation);
+        link_pairing_arm_confirmation(generation)) pairing_view(PASSPORT_MUSE_CONFIRM, "OK: allow pairing", generation);
     else ble_server_disconnect_pairing_session(generation);
 }
 void provision(const char *ssid, const char *, const char *access, const char *refresh,
@@ -202,14 +202,14 @@ void provision(const char *ssid, const char *, const char *access, const char *r
                const char *api, const char *host, uint32_t generation) {
     s_callbacks++;
     if (!s_exit && link_pairing_provisioning_session_valid(generation)) {
-        pairing_view(PASSPORT_MUSE_PHONE_SETUP, "正在保存手机配置", generation);
+        pairing_view(PASSPORT_MUSE_PHONE_SETUP, "Saving phone setup", generation);
         auto &wifi = WifiManager::GetInstance();
         if (!ssid || !*ssid || !access || !*access || !refresh || !*refresh) {
             ble_server_send_pairing_status("error_missing_credentials", generation);
-            view(PASSPORT_MUSE_ERROR, "配对资料不完整，请在手机重试");
+            view(PASSPORT_MUSE_ERROR, "Pairing data incomplete, retry on phone");
         } else if (!wifi.IsConnected() || wifi.GetSsid() != ssid) {
             ble_server_send_pairing_status("wifi_failed", generation);
-            view(PASSPORT_MUSE_ERROR, "手机配对时\n请选择设备当前 Wi-Fi");
+            view(PASSPORT_MUSE_ERROR, "Pairing: on phone, pick\nthe device's Wi-Fi");
         } else {
             ble_server_send_pairing_status("wifi_connected", generation);
             bool ok = config_clear_setup_complete() && config_set_str("access_token", access) &&
@@ -225,12 +225,12 @@ void provision(const char *ssid, const char *, const char *access, const char *r
                 } else {
                     // Keep discovery alive when the final result was not sent.
                     config_clear_setup_complete();
-                    view(PASSPORT_MUSE_ERROR, "配对结果未送达，请重新添加");
+                    view(PASSPORT_MUSE_ERROR, "Pairing not delivered, add again");
                 }
             } else {
                 config_clear_pairing();
                 ble_server_send_pairing_status("error_storage", generation);
-                view(PASSPORT_MUSE_ERROR, "配对未保存，请重试");
+                view(PASSPORT_MUSE_ERROR, "Pairing not saved, retry");
             }
         }
     }
@@ -242,7 +242,7 @@ void unpair() {
     config_clear_pairing();
     s_paired = false;
     s_exit = true;
-    view(PASSPORT_MUSE_ERROR, "已解除配对，重新进入可配对");
+    view(PASSPORT_MUSE_ERROR, "Unpaired, re-enter to pair");
 }
 void setup_ble() {
     const ble_callbacks_t callbacks = {
@@ -255,8 +255,8 @@ void setup_ble() {
     ble_server_start(s_ble_name, &callbacks);
     if (ble_server_is_started()) {
         ble_server_begin_advertising();
-        view(PASSPORT_MUSE_PAIRING, "手机 Muse / 设置 / 设备");
-    } else view(PASSPORT_MUSE_ERROR, "蓝牙启动失败，请返回重试");
+        view(PASSPORT_MUSE_PAIRING, "Phone Muse / Settings / Devices");
+    } else view(PASSPORT_MUSE_ERROR, "Bluetooth failed, go back and retry");
 }
 void log_network() {
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -280,12 +280,12 @@ void log_network() {
 bool resolve_api(const char *endpoint) {
     const char *url = endpoint && *endpoint ? endpoint : VM_API_DEFAULT_BASE_URL;
     const char *begin = strstr(url, "://");
-    if (!begin) { view(PASSPORT_MUSE_ERROR, "服务器配置无效，请重新配对"); return false; }
+    if (!begin) { view(PASSPORT_MUSE_ERROR, "Invalid server config, re-pair"); return false; }
     begin += 3;
     size_t length = strcspn(begin, ":/?#");
     char hostname[128];
     if (!length || length >= sizeof(hostname)) {
-        view(PASSPORT_MUSE_ERROR, "服务器配置无效，请重新配对"); return false;
+        view(PASSPORT_MUSE_ERROR, "Invalid server config, re-pair"); return false;
     }
     memcpy(hostname, begin, length); hostname[length] = 0;
     log_network();
@@ -294,18 +294,18 @@ bool resolve_api(const char *endpoint) {
     int rc = getaddrinfo(hostname, nullptr, &hints, &result);
     if (result) freeaddrinfo(result);
     ESP_LOGI("muse_net", "api_dns_result=%d", rc);
-    if (rc) { view(PASSPORT_MUSE_ERROR, "服务器域名解析失败\n网络恢复后自动重连"); s_retryable = true; }
+    if (rc) { view(PASSPORT_MUSE_ERROR, "Server DNS failed\nAuto-retry when online"); s_retryable = true; }
     return rc == 0;
 }
 bool connect_account(bool refresh_first) {
     if (ble_server_is_started()) {
-        view(PASSPORT_MUSE_ERROR, "蓝牙未释放，请重启后连接");
+        view(PASSPORT_MUSE_ERROR, "Bluetooth busy, restart to connect");
         return false;
     }
     s_retryable = false;
-    view(PASSPORT_MUSE_CONNECTING, "正在连接你的 Muse");
+    view(PASSPORT_MUSE_CONNECTING, "Connecting to your Muse");
     if (!muse_wifi_connected()) {
-        view(PASSPORT_MUSE_ERROR, "Wi-Fi 未连接\n连上网络后自动重连"); s_retryable = true; return false;
+        view(PASSPORT_MUSE_ERROR, "Wi-Fi not connected\nAuto-retry when online"); s_retryable = true; return false;
     }
     char endpoint[256], host[128];
     config_get_str("api_url_v2", endpoint, sizeof(endpoint));
@@ -318,7 +318,7 @@ bool connect_account(bool refresh_first) {
     char *refresh = static_cast<char *>(calloc(1, 4096));
     if (!access || !refresh) {
         free(access); free(refresh);
-        view(PASSPORT_MUSE_ERROR, "内存不足，请返回重试"); return false;
+        view(PASSPORT_MUSE_ERROR, "Low memory, go back and retry"); return false;
     }
     config_get_str("access_token", access, 4096);
     config_get_str("refresh_token", refresh, 4096);
@@ -347,10 +347,10 @@ bool connect_account(bool refresh_first) {
     bool ok = !s_exit && vm && noise_ctrl_connect(vm->vm_id, vm->vm_auth_token, WifiManager::GetInstance().GetSsid().c_str());
     vm_list_free(vms, count > 0 ? count : 0);
     s_retryable = !ok && !storage_failed && !refresh_rejected && count != VM_API_ERR_AUTH && count != 0;
-    if (!ok && !s_exit) view(PASSPORT_MUSE_ERROR, storage_failed ? "授权未保存，请确定重试" :
-        refresh_rejected ? "账号授权失效，请重新配对" :
-        count == VM_API_ERR_AUTH ? "云端暂未接受授权\n确定重试" :
-        count == 0 ? "账号没有可用的 Muse，请查看手机" : "云端未连通\n稍后自动重连");
+    if (!ok && !s_exit) view(PASSPORT_MUSE_ERROR, storage_failed ? "Auth not saved, OK: retry" :
+        refresh_rejected ? "Account auth expired, re-pair" :
+        count == VM_API_ERR_AUTH ? "Cloud refused auth\nOK: retry" :
+        count == 0 ? "No Muse on account, check phone" : "Cloud unreachable\nAuto-retry later");
     return ok;
 }
 // Full teardown and fresh account connect; also re-reads the proxy route.
@@ -389,7 +389,7 @@ void worker(void *) {
                     recover_pairing_prompt(generation);
                 }
             } else if (current.stage == PASSPORT_MUSE_ERROR && !ble_server_has_connection()) {
-                view(PASSPORT_MUSE_PAIRING, "手机 Muse / 设置 / 设备");
+                view(PASSPORT_MUSE_PAIRING, "Phone Muse / Settings / Devices");
             }
         }
         if (s_repair.exchange(false)) {
@@ -404,17 +404,17 @@ void worker(void *) {
                 s_paired = false; s_pair_done = false; s_refresh = false; s_confirm = false;
                 portENTER_CRITICAL(&s_lock); s_view.paired = false; portEXIT_CRITICAL(&s_lock);
                 setup_ble();
-            } else if (!s_exit) view(PASSPORT_MUSE_ERROR, "配对记录未清除，请返回重试");
+            } else if (!s_exit) view(PASSPORT_MUSE_ERROR, "Pairing not cleared, go back, retry");
         }
         if (s_confirm.exchange(false)) {
             passport_muse_snapshot_t current; passport_muse_snapshot(&current);
             uint32_t gen = link_pairing_confirm_active_session();
             if (gen) {
                 if (ble_server_send_pairing_status("pairing_confirmed", gen))
-                    pairing_view(PASSPORT_MUSE_PHONE_SETUP, "请在手机选择当前 Wi-Fi", gen);
+                    pairing_view(PASSPORT_MUSE_PHONE_SETUP, "Pick current Wi-Fi on phone", gen);
                 else {
                     ble_server_disconnect_pairing_session(gen);
-                    view(PASSPORT_MUSE_ERROR, "确认未送达，请在手机重试");
+                    view(PASSPORT_MUSE_ERROR, "Confirm not delivered, retry on phone");
                 }
             }
             else if (s_paired && !recording && current.stage == PASSPORT_MUSE_ERROR) {
@@ -448,11 +448,11 @@ void worker(void *) {
             if (!muse_hatch_initialized()) {
                 muse_hatch_stop();
                 noise_ctrl_disconnect();
-                view(PASSPORT_MUSE_ERROR, "内存不足，请返回重试");
+                view(PASSPORT_MUSE_ERROR, "Low memory, go back and retry");
             } else {
                 passport_muse_snapshot_t current; passport_muse_snapshot(&current);
-                if (current.reply_is_answer) view(PASSPORT_MUSE_REPLY, "继续同步后续回复");
-                else view(PASSPORT_MUSE_READY, "按住上键说话");
+                if (current.reply_is_answer) view(PASSPORT_MUSE_REPLY, "Syncing further replies");
+                else view(PASSPORT_MUSE_READY, "Hold Up to talk");
             }
         }
         int64_t now = esp_timer_get_time();
@@ -477,7 +477,7 @@ void worker(void *) {
             pressed = false; s_pressed = false;
             muse_hatch_turn_cancel();
             if (recording) { recording = false; bsp_audio_deinit(); }
-            view(noise_ctrl_is_connected() ? PASSPORT_MUSE_READY : PASSPORT_MUSE_CONNECTING, "已停止等待，已发送任务请在手机查看");
+            view(noise_ctrl_is_connected() ? PASSPORT_MUSE_READY : PASSPORT_MUSE_CONNECTING, "Stopped waiting, check task on phone");
         }
         if (pressed && !previous_press) {
             if (muse_hatch_ready()) {
@@ -490,12 +490,12 @@ void worker(void *) {
                 recording = muse_hatch_turn_recording();
                 if (recording) {
                     began = esp_timer_get_time();
-                    answer(""); view(PASSPORT_MUSE_LISTENING, "松开上键发送");
+                    answer(""); view(PASSPORT_MUSE_LISTENING, "Release Up to send");
                     ESP_LOGI("muse_ptt", "recording started heap=%u largest=%u",
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
                              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
                 } else bsp_audio_deinit();
-            } else { bsp_audio_deinit(); view(PASSPORT_MUSE_ERROR, "连接或麦克风未就绪"); }
+            } else { bsp_audio_deinit(); view(PASSPORT_MUSE_ERROR, "Link or mic not ready"); }
         }
         if (recording && (!pressed || esp_timer_get_time() - began >= 30000000)) {
             recording = false; s_pressed = false; pressed = false;
@@ -503,14 +503,14 @@ void worker(void *) {
             bsp_audio_deinit();
             bsp_memory_phase("muse.reply");
             muse_hatch_turn_end();
-            view(PASSPORT_MUSE_WORKING, "等待 Muse 回复");
+            view(PASSPORT_MUSE_WORKING, "Waiting for Muse");
         }
         previous_press = pressed;
         if (recording) {
             int16_t pcm[256];
             if (bsp_audio_read(pcm, sizeof(pcm)) != ESP_OK) {
                 muse_hatch_turn_cancel(); bsp_audio_deinit(); recording = false;
-                view(PASSPORT_MUSE_ERROR, "录音失败，请重试");
+                view(PASSPORT_MUSE_ERROR, "Recording failed, retry");
             } else {
                 unsigned peak = 0;
                 for (int16_t sample : pcm) { unsigned n = sample < 0 ? -int(sample) : sample; if (n > peak) peak = n; }
@@ -528,14 +528,14 @@ void worker(void *) {
         } else if (ev == MUSE_HATCH_EV_HEARD) {
             answer(text);
         } else if (ev == MUSE_HATCH_EV_REPLY) {
-            reply_answer(); view(PASSPORT_MUSE_REPLY, "继续同步后续回复");
+            reply_answer(); view(PASSPORT_MUSE_REPLY, "Syncing further replies");
         } else if (ev == MUSE_HATCH_EV_SYNCING) {
-            view(PASSPORT_MUSE_WORKING, "正在恢复回复同步");
+            view(PASSPORT_MUSE_WORKING, "Resuming reply sync");
         } else if (ev == MUSE_HATCH_EV_RESUMED || ev == MUSE_HATCH_EV_DONE) {
             passport_muse_snapshot_t current; passport_muse_snapshot(&current);
-            view(current.reply_is_answer ? PASSPORT_MUSE_REPLY : PASSPORT_MUSE_WORKING, "继续同步后续回复");
+            view(current.reply_is_answer ? PASSPORT_MUSE_REPLY : PASSPORT_MUSE_WORKING, "Syncing further replies");
         } else if (ev == MUSE_HATCH_EV_SENT) {
-            view(PASSPORT_MUSE_WORKING, "Muse 已收到语音");
+            view(PASSPORT_MUSE_WORKING, "Muse got your voice");
         }
         if (!recording && capture_wifi) {
             WifiManager::GetInstance().SetPowerSaveLevel(WifiPowerSaveLevel::BALANCED);
@@ -596,7 +596,7 @@ extern "C" esp_err_t passport_muse_start(void) {
     s_exit = false; s_pressed = false; s_cancel = false; s_confirm = false; s_pair_done = false; s_refresh = false; s_repair = false;
     s_connected_event = false;
     s_prepare_event = false;
-    s_connect_detail = "正在重新连接";
+    s_connect_detail = "Reconnecting";
     s_pairing_prompt_generation = 0;
     bool token, paired; passport_muse_config_status(&token, &paired);
     s_paired = paired;
@@ -609,25 +609,25 @@ extern "C" esp_err_t passport_muse_start(void) {
     s_view = {}; s_view.sdk_token_set = token; s_view.paired = paired;
     strlcpy(s_view.name, "Muse", sizeof(s_view.name)); strlcpy(s_view.device_name, s_ble_name, sizeof(s_view.device_name));
     portEXIT_CRITICAL(&s_lock);
-    if (!token) { view(PASSPORT_MUSE_NEEDS_TOKEN, "手机设置页填写 SDK Token"); return ESP_OK; }
+    if (!token) { view(PASSPORT_MUSE_NEEDS_TOKEN, "Enter SDK Token on phone setup"); return ESP_OK; }
     // A paired device waits in the worker and reconnects once Wi-Fi is up;
     // pairing itself needs the network the phone will choose.
-    if (!paired && !muse_wifi_connected()) { view(PASSPORT_MUSE_ERROR, "请先连接 Wi-Fi"); return ESP_OK; }
+    if (!paired && !muse_wifi_connected()) { view(PASSPORT_MUSE_ERROR, "Connect Wi-Fi first"); return ESP_OK; }
     config_get_str("sdk_token", s_sdk_token, sizeof(s_sdk_token));
     if (!noise_ctrl_initialized()) {
         noise_ctrl_init(s_node, "Passport OS", status);
         noise_ctrl_set_agent_name_cb(agent_name); noise_ctrl_set_command_cb(command);
     }
-    if (!noise_ctrl_initialized()) { view(PASSPORT_MUSE_ERROR, "内存不足，请返回重试"); return ESP_ERR_NO_MEM; }
+    if (!noise_ctrl_initialized()) { view(PASSPORT_MUSE_ERROR, "Low memory, go back and retry"); return ESP_ERR_NO_MEM; }
     TaskHandle_t task = nullptr;
-    view(PASSPORT_MUSE_CONNECTING, "正在准备连接");
+    view(PASSPORT_MUSE_CONNECTING, "Preparing connection");
     s_worker_running = true;
     // Proxy TLS plus the account-response parser exceeds 8 KiB on ESP-IDF
     // 5.5.3 (observed stack-protection fault just below the task boundary).
     // Keep this extra budget local to Muse instead of enlarging other apps.
     if (xTaskCreate(worker, "passport_muse", 12288, nullptr, 4, &task) != pdPASS) {
         s_worker_running = false;
-        view(PASSPORT_MUSE_ERROR, "内存不足，请返回重试"); return ESP_ERR_NO_MEM;
+        view(PASSPORT_MUSE_ERROR, "Low memory, go back and retry"); return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
 }
@@ -655,7 +655,7 @@ extern "C" void passport_muse_repair(void) {
     else {
         passport_muse_stop();
         if (config_clear_pairing()) passport_muse_start();
-        else view(PASSPORT_MUSE_ERROR, "配对记录未清除，请返回重试");
+        else view(PASSPORT_MUSE_ERROR, "Pairing not cleared, go back, retry");
     }
 }
 extern "C" void passport_muse_log_diagnostics(void) { log_network(); }

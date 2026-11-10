@@ -11,7 +11,7 @@ extern "C" {
 
 #include "ui_palette.h"
 
-// 字间距规范
+// Letter spacing spec
 #define UI_LS_TITLE   1
 #define UI_LS_BODY    0
 
@@ -39,10 +39,10 @@ lv_obj_t *ui_pixel_mascot_create(lv_obj_t *parent, int x, int y);
 void ui_pixel_mascot_jump(lv_obj_t *mascot);
 void ui_pixel_set_selected(lv_obj_t *panel, bool selected, bool enabled);
 
-// ---- 2026-09-13 新增共享构件 ----
+// ---- 2026-09-13 new shared components ----
 
 // Open title with a bottom rule, bounded to 216px at y.
-// 返回牌对象(可继续改 y 或加子对象)。
+// Returns the card object (y can be changed further or children added).
 lv_obj_t *ui_pixel_title_plate(lv_obj_t *parent, int y, const char *text,
                                const lv_font_t *font);
 
@@ -51,7 +51,7 @@ lv_obj_t *ui_pixel_hint_pill(lv_obj_t *parent, const char *text,
                              const lv_font_t *font);
 
 // 26px shared status bar. Use LEFT_MID/RIGHT_MID
-// 对齐即垂直居中。
+// Alignment means vertical centering.
 lv_obj_t *ui_pixel_top_bar(lv_obj_t *parent);
 
 // Battery text starts at x=160; keep other status content before x=156.
@@ -59,8 +59,8 @@ enum { UI_STATUS_CONTENT_RIGHT = 156, UI_STATUS_BATTERY_LEFT = 160 };
 void ui_pixel_status_text_align(lv_obj_t *label, int x, int width,
                                 lv_text_align_t align);
 
-// 像素电池:描边框 + 电量填充 + 百分比文字。
-// frame_color/文字色由调用方给(顶栏深底用白,纸面浅底用墨)。
+// Pixel battery: outline frame + charge fill + percentage text.
+// frame_color/text color are supplied by the caller (white on the dark top bar, ink on light paper).
 typedef struct {
     lv_obj_t *fill;
     lv_obj_t *label;
@@ -68,10 +68,10 @@ typedef struct {
 ui_pixel_battery_t ui_pixel_battery_create(lv_obj_t *parent, int x, int y,
                                            uint32_t frame_color,
                                            const lv_font_t *font);
-void ui_pixel_battery_set(ui_pixel_battery_t *batt, int soc);  // soc<0 显示 "--"
+void ui_pixel_battery_set(ui_pixel_battery_t *batt, int soc);  // soc<0 shows "--"
 void ui_pixel_battery_set_on_dark(ui_pixel_battery_t *batt, int soc);
 
-// Wi-Fi 信号 3 格(几何条,不依赖图标字体)。
+// Wi-Fi signal, 3 bars (geometric bars, no dependence on the icon font).
 void ui_pixel_wifi_bars_create(lv_obj_t *parent, int x, int y,
                                lv_obj_t *bars[3]);
 void ui_pixel_wifi_bars_set(lv_obj_t *bars[3], int level, uint32_t color);

@@ -4,7 +4,7 @@
 
 #define TC_PIECES 7
 
-// 7 种方块 × 4 旋转态 × 4 格 (ox,oy)。标准 SRS 形状。
+// 7 pieces x 4 rotation states x 4 cells (ox,oy). Standard SRS shapes.
 static const int8_t kShapes[TC_PIECES][4][4][2] = {
     { /* I */
         {{0,1},{1,1},{2,1},{3,1}}, {{2,0},{2,1},{2,2},{2,3}},
@@ -56,7 +56,7 @@ static uint32_t next_rand(void) {
 }
 
 static uint8_t bag_next(void) {
-    if (s.bag_pos >= TC_PIECES) { /* 7-bag:洗满一袋再逐个出 */
+    if (s.bag_pos >= TC_PIECES) { /* 7-bag: draw the whole bag before reshuffling */
         for (int i = 0; i < TC_PIECES; ++i) s.bag[i] = (uint8_t)i;
         for (int i = TC_PIECES - 1; i > 0; --i) {
             uint8_t j = (uint8_t)(next_rand() % (uint32_t)(i + 1));
@@ -76,7 +76,7 @@ static bool hit(int8_t pxc, int8_t pyc, int8_t rotp) {
         const int8_t cy = pyc + cells[i][1];
         if (cx < 0 || cx >= TC_COLS || cy >= TC_ROWS) return true;
         if (cy >= 0 && s.board[cy][cx]) return true;
-        /* cy<0:还没进板,视为可行 */
+        /* cy<0: not on the board yet, counts as valid */
     }
     return false;
 }
@@ -87,7 +87,7 @@ static void spawn(void) {
     s.rot = 0;
     s.px = 3;
     s.py = -1;
-    /* 出生点就被埋住 → 顶死 */
+    /* spawn point already buried -> topped out */
     if (hit(s.px, s.py, s.rot) && !hit(s.px, 0, s.rot)) s.py = 0;
     if (hit(s.px, s.py, s.rot)) s.phase = TC_DEAD;
 }
@@ -99,7 +99,7 @@ static void lock_and_spawn(void) {
         const int8_t cx = s.px + cells[i][0];
         const int8_t cy = s.py + cells[i][1];
         if (cy < 0) {
-            topped = true; /* 有格子悬在板外锁定 = 堆到顶 */
+            topped = true; /* a cell locked above the board = stacked to the top */
             continue;
         }
         s.board[cy][cx] = (uint8_t)(s.cur + 1);
@@ -109,7 +109,7 @@ static void lock_and_spawn(void) {
         return;
     }
 
-    /* 消行 */
+    /* clear lines */
     static const uint16_t kLineScore[5] = {0, 100, 300, 500, 800};
     int cleared = 0;
     for (int row = TC_ROWS - 1; row >= 0; --row) {
@@ -126,7 +126,7 @@ static void lock_and_spawn(void) {
             for (int c = 0; c < TC_COLS; ++c) s.board[r][c] = s.board[r - 1][c];
         }
         for (int c = 0; c < TC_COLS; ++c) s.board[0][c] = 0;
-        ++row; /* 同行重查(整体下移后) */
+        ++row; /* recheck the same row (after everything shifted down) */
     }
     if (cleared) {
         s.lines += cleared;
@@ -143,7 +143,7 @@ void tc_reset(void) {
     s.score = 0;
     s.lines = 0;
     s.level = 1;
-    s.bag_pos = TC_PIECES; /* 强制重洗 */
+    s.bag_pos = TC_PIECES; /* force a reshuffle */
 }
 
 void tc_start(uint32_t seed) {

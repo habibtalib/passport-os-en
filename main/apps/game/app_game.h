@@ -1,10 +1,10 @@
-// 《你在狗叫什么》声控魔性 App。
-// 内存策略(上线硬约束):
-//   1. 零大缓冲 —— 不用 canvas/framebuffer,鸟和管道全部是常驻小对象池(约40个
-//      lv_obj,~5KB),游戏过程零堆分配;
-//   2. 不另起渲染任务 —— 游戏循环是 33ms 的 lv_timer,跑在 LVGL 任务里;
-//      唯一的额外任务是采音(3KB 栈,读满即算,与 UI 只隔一个原子变量);
-//   3. stop() 全量回收:先删定时器再拆屏,采音任务join后返回,堆回到进入前水平。
+// "Bark Battle": a voice-controlled, addictive game app.
+// Memory policy (hard launch constraint):
+//   1. Zero big buffers -- no canvas/framebuffer; the character and pipes are all small resident object pools (~40
+//      lv_obj, ~5KB), with zero heap allocation during play;
+//   2. No separate render task -- the game loop is a 33ms lv_timer running in the LVGL task;
+//      the only extra task is mic capture (3KB stack, compute as it reads, one atomic variable shared with the UI);
+//   3. stop() reclaims everything: delete the timer first, then tear down the screen, return after the mic task is joined, heap back to its pre-entry level.
 #pragma once
 
 #include "apps/app_base.h"

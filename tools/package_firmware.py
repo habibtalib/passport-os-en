@@ -15,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = {'.github', 'bootloader_components', 'components', 'docs', 'main', 'tests', 'third_party', 'tools', 'web'}
 SOURCE_ROOT_FILES = {'.gitignore', 'CMakeLists.txt', 'build.sh', 'dependencies.lock',
-                     'partitions.csv', 'sdkconfig.defaults', 'LICENSE', 'README.md', 'README.zh_CN.md'}
+                     'partitions.csv', 'sdkconfig.defaults', 'LICENSE', 'README.md'}
 
 
 def digest(data: bytes) -> str:

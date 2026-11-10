@@ -15,11 +15,11 @@ namespace xiaozhi {
 
 namespace {
 
-// v3 二进制帧头：4 字节，payload_size 为大端。
+// v3 binary frame header: 4 bytes, payload_size is big-endian.
 struct __attribute__((packed)) BinaryHeaderV3 {
     uint8_t type;          // 0: audio, 1: json
     uint8_t reserved;      // 0
-    uint16_t payload_size; // 网络字节序 (big-endian)
+    uint16_t payload_size; // network byte order (big-endian)
 };
 
 constexpr size_t kBinaryHeaderLen = sizeof(BinaryHeaderV3);
@@ -38,7 +38,7 @@ std::string MakeUuidV4() {
     return buf;
 }
 
-// Client-Id 官方要求是「持久化的随机 UUIDv4」，不是 MAC。首次生成后写入 NVS。
+// The official spec requires Client-Id to be a "persisted random UUIDv4", not the MAC. Generated once, then written to NVS.
 std::string LoadOrCreateClientId() {
     std::string stored = store_get_string(kNsXiaozhi, "client_id", "");
     if (!stored.empty()) return stored;
@@ -63,7 +63,7 @@ void Protocol::LoadIdentity() {
     uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     char mac_buf[18];
-    // 官方 Device-Id 是「小写冒号分隔」MAC（xiaozhi-esp32 system_info.cc）
+    // The official Device-Id is the MAC in "lowercase, colon-separated" form (xiaozhi-esp32 system_info.cc)
     std::snprintf(mac_buf, sizeof(mac_buf), "%02x:%02x:%02x:%02x:%02x:%02x",
                   mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     mac_address_ = mac_buf;
@@ -72,7 +72,7 @@ void Protocol::LoadIdentity() {
 }
 
 Protocol::~Protocol() {
-    // 析构只做资源释放；不允许在这里回调上层（对象正在销毁）。
+    // The destructor only releases resources; calling back into upper layers here is not allowed (object is being destroyed).
     if (client_) {
         esp_websocket_client_stop(client_);
         esp_websocket_client_destroy(client_);
@@ -112,8 +112,8 @@ bool Protocol::Start(const std::string &url, const std::string &token, int versi
 
     esp_websocket_client_config_t ws_cfg = {};
     ws_cfg.uri = url_.c_str();
-    // 1024 就够：小智的 JSON 报文都很小，超长报文由本层的显式分片重组兜住
-    // （payload_offset/payload_len）。每 1KB 缓冲都是从 ~90KB 堆里省出来的。
+    // 1024 is enough: Xiaozhi JSON messages are small, and oversized messages are handled by this layer's explicit fragment reassembly
+    // (payload_offset/payload_len). Every 1KB of buffer is saved from a ~90KB heap.
     ws_cfg.buffer_size = 1024;
     ws_cfg.task_stack = 5120;          // small JSON + bounded audio enqueue; no codec work
     ws_cfg.task_prio = 5;
@@ -122,7 +122,7 @@ bool Protocol::Start(const std::string &url, const std::string &token, int versi
     ws_cfg.network_timeout_ms = 8000;
     ws_cfg.crt_bundle_attach = esp_crt_bundle_attach;
 
-    // 官方握手请求头（xiaozhi-esp32 websocket_protocol.cc:97-106）
+    // Official handshake request headers (xiaozhi-esp32 websocket_protocol.cc:97-106)
     std::string headers;
     if (!token.empty()) {
         if (token.find(' ') == std::string::npos) {
@@ -158,13 +158,13 @@ bool Protocol::Start(const std::string &url, const std::string &token, int versi
 }
 
 void Protocol::Stop() {
-    // 注意：绝不能从 websocket 任务/回调里调用 —— 组件会直接拒绝
-    // （"Client cannot be stopped from websocket task"）并返回失败。
+    // Note: must never be called from the websocket task/callback -- the component rejects it outright
+    // ("Client cannot be stopped from websocket task") and returns failure.
     // Suppress terminal callbacks from our own stop; callbacks never destroy
     // the client. Join its worker before clearing the old session's mailbox.
     needs_restart_ = true;
     if (client_) {
-        esp_websocket_client_stop(client_);      // 内部等待接收任务退出
+        esp_websocket_client_stop(client_);      // waits internally for the receive task to exit
         esp_websocket_client_destroy(client_);
         client_ = nullptr;
     }
@@ -196,7 +196,7 @@ void Protocol::Publish(EvType type, const char *text, State st) {
     ev.type = type;
     ev.state = st;
     if (text != nullptr) {
-        // 安全截断：保证 NUL 结尾，且不产生半个 UTF-8 也能接受的展示效果
+        // Safe truncation: guarantee NUL termination, and the display result is acceptable even if it cuts a UTF-8 character in half
         std::strncpy(ev.text, text, kEventTextCap - 1);
         ev.text[kEventTextCap - 1] = '\0';
     }
@@ -242,7 +242,7 @@ bool Protocol::SendJson(const std::string &json) {
 
 bool Protocol::TriggerStartListen() {
     if (!IsConnected() || !HandshakeDone() || session_id_.empty()) return false;
-    // 官方格式：session_id 必须回传，否则服务端无法把这一轮挂到会话上。
+    // Official format: session_id must be sent back, otherwise the server cannot attach this round to the session.
     std::string msg = "{\"session_id\":\"" + session_id_ +
                       "\",\"type\":\"listen\",\"state\":\"start\",\"mode\":\"auto\"}";
     if (!SendJson(msg)) return false;
@@ -293,7 +293,7 @@ bool Protocol::SendAudio(const uint8_t *opus_data, size_t len) {
         return sent == total;
     }
 
-    // v1：裸 Opus，无帧头
+    // v1: raw Opus, no frame header
     int sent = esp_websocket_client_send_bin(client_, reinterpret_cast<const char *>(opus_data),
                                             (int)len, kSendTimeoutMs);
     return sent == (int)len;
@@ -331,7 +331,7 @@ void Protocol::WebsocketEventHandler(void *handler_args, esp_event_base_t base,
         ESP_LOGE(TAG, "WebSocket error, type=%d", data ? (int)data->error_handle.error_type : -1);
         self->hello_ok_ = false;
         self->SetState(State::Error);
-        self->Publish(EvType::SocketError, "网络连接异常");
+        self->Publish(EvType::SocketError, "Network error");
         break;
     }
     default:
@@ -346,10 +346,10 @@ void Protocol::OnConnected() {
     ResetRx();
     Publish(EvType::Connected, nullptr);
 
-    // 官方 hello 报文：version / features{mcp} / transport / audio_params
-    // 本机没有实现 MCP 工具（IoT 能力），因此如实声明 mcp:false —— 声明 true 会让
-    // 服务端把工具调用请求推给我们，而我们无法回应，白白干扰对话。
-    // frame_duration 如实上报本机编码帧长（60ms，见 xiaozhi_audio.h 的说明）。
+    // Official hello message: version / features{mcp} / transport / audio_params
+    // This device implements no MCP tools (IoT capability), so it honestly declares mcp:false -- declaring true would make the
+    // server push tool-call requests to us that we cannot answer, needlessly disturbing the conversation.
+    // frame_duration honestly reports this device's encoder frame length (60ms, see the note in xiaozhi_audio.h).
     char hello[256];
     std::snprintf(hello, sizeof(hello),
                   "{\"type\":\"hello\",\"version\":%d,\"features\":{\"mcp\":false},"
@@ -358,7 +358,7 @@ void Protocol::OnConnected() {
                   version_, kEncFrameDurationMs);
     if (!SendJson(hello)) {
         ESP_LOGE(TAG, "Failed to send hello");
-        Publish(EvType::SocketError, "握手报文发送失败");
+        Publish(EvType::SocketError, "Handshake send failed");
     }
 }
 
@@ -388,7 +388,7 @@ void Protocol::HandleData(const esp_websocket_event_data_t *d) {
     const size_t n = (size_t)d->data_len;
 
     if (d->op_code == 0x02 || (d->op_code == 0x00 && bin_len_ > 0)) {
-        // 二进制：云端 Opus 音频。分片也要重组，否则半帧会被当整帧解码成噪声。
+        // Binary: cloud Opus audio. Fragments must be reassembled too, otherwise a half frame would be decoded as a whole frame into noise.
         if (d->op_code == 0x02 && off == 0) bin_len_ = 0;
         size_t space = kMaxBinaryMessage - bin_len_;
         size_t copy = (n > space) ? space : n;
@@ -408,7 +408,7 @@ void Protocol::HandleData(const esp_websocket_event_data_t *d) {
             if (version_ >= 3 && plen > kBinaryHeaderLen) {
                 auto *hdr = reinterpret_cast<const BinaryHeaderV3 *>(rx_bin_);
                 uint16_t declared = ntohs(hdr->payload_size);
-                // 声明长度与实际吻合才按 v3 拆头，否则整帧交给解码器兜底
+                // Only split the header as v3 if the declared length matches the actual length; otherwise hand the whole frame to the decoder as a fallback
                 if (hdr->type == 0 && declared == plen - kBinaryHeaderLen) {
                     payload = rx_bin_ + kBinaryHeaderLen;
                     plen = declared;
@@ -502,7 +502,7 @@ void Protocol::DispatchText() {
         } else if (std::strcmp(st->valuestring, "stop") == 0) {
             SetState(State::Idle);
         } else if (std::strcmp(st->valuestring, "sentence_start") == 0) {
-            // 官方把回复正文放在这里（llm 报文只有 emotion）
+            // The official server puts the reply body here (the llm message only has emotion)
             const cJSON *txt = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(txt) && txt->valuestring) {
                 Publish(EvType::AiSentence, txt->valuestring);
@@ -515,15 +515,15 @@ void Protocol::DispatchText() {
         if (cJSON_IsString(txt) && txt->valuestring) {
             Publish(EvType::UserText, txt->valuestring);
         }
-        // auto 模式由服务端 VAD 决定本轮说话结束。收到识别结果就进入思考态，
-        // 上层据此彻底停止录音，再允许后续 TTS 播放，保持严格半双工。
+        // In auto mode the server VAD decides when this turn of speech ends. On receiving the recognition result enter Thinking,
+        // so the upper layer fully stops recording before TTS playback is allowed, keeping strict half-duplex.
         SetState(State::Thinking);
     } else if (std::strcmp(t, "llm") == 0) {
         const cJSON *emo = cJSON_GetObjectItem(root, "emotion");
         if (cJSON_IsString(emo) && emo->valuestring) {
             Publish(EvType::LlmEmotion, emo->valuestring);
         }
-        // 兜底：部分服务端仍会带 text
+        // Fallback: some servers still send text
         const cJSON *txt = cJSON_GetObjectItem(root, "text");
         if (cJSON_IsString(txt) && txt->valuestring && txt->valuestring[0]) {
             Publish(EvType::AiSentence, txt->valuestring);
@@ -535,7 +535,7 @@ void Protocol::DispatchText() {
         const cJSON *status = cJSON_GetObjectItem(root, "status");
         char buf[kEventTextCap];
         std::snprintf(buf, sizeof(buf), "%s%s%s",
-                      (cJSON_IsString(msg) && msg->valuestring) ? msg->valuestring : "服务端告警",
+                      (cJSON_IsString(msg) && msg->valuestring) ? msg->valuestring : "Server alert",
                       (cJSON_IsString(status) && status->valuestring) ? " " : "",
                       (cJSON_IsString(status) && status->valuestring) ? status->valuestring : "");
         Publish(EvType::Alert, buf);

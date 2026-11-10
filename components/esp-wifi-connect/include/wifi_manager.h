@@ -150,8 +150,8 @@ private:
     bool initialized_ = false;
     bool station_active_ = false;
     bool config_mode_active_ = false;
-    // 期望省电档:station 未运行时 SetPowerSaveLevel 只记这里,StartStation 重放。
-    // 默认 BALANCED 等价 IDF 默认 MIN_MODEM,保持历史行为。
+    // Desired power-save level: when the station is not running SetPowerSaveLevel only records it here, and StartStation replays it.
+    // Default BALANCED equals the IDF default MIN_MODEM, keeping historical behavior.
     WifiPowerSaveLevel desired_ps_level_ = WifiPowerSaveLevel::BALANCED;
 
     std::function<void(WifiEvent, const std::string&)> event_callback_;

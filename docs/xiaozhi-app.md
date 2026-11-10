@@ -1,152 +1,151 @@
-# 小智 AI 对话应用（passport-os/main/apps/xiaozhi）改造记录
+# Xiaozhi AI conversation app (passport-os/main/apps/xiaozhi): rework notes
 
-本文记录把 FoloToy `folo-ai-passport-xiaozhi` 的对话能力并进 Passport OS 之后，
-针对「服务跑不通（对话没有返回）」和「对话后不稳定、闪退」两个问题的定位与修复。
+This document records how two problems were located and fixed after the conversation capability of FoloToy `folo-ai-passport-xiaozhi` was merged into Passport OS: "the service doesn't work (no reply to the conversation)" and "instability and crashes after a conversation".
 
-硬件：ESP32-C3（400KB SRAM / 8MB Flash），应用启动后可用堆约 **94KB**。
-桌面端日志基线：`Initial Free Heap: 95 KB`；进入小智 App 时 `94 KB`。
+Hardware: ESP32-C3 (400KB SRAM / 8MB Flash); the available heap after the app starts is about **94KB**.
+Desktop log baseline: `Initial Free Heap: 95 KB`; on entering the Xiaozhi app, `94 KB`.
 
 ---
 
-## 一、结论速览
+## 1. Summary of conclusions
 
-| # | 症状 | 根因 | 修复 |
+| # | Symptom | Root cause | Fix |
 | --- | --- | --- | --- |
-| 1 | 连不上小智后台 / 对话没有返回 | 完全跳过了官方后台的 **OTA 取配置**流程，硬编码 `wss://api.tenclass.net/xiaozhi/v1/` + 字面量 `test-token`，拿不到服务端下发的 `websocket{url,token,version}` | 新增 `xiaozhi_ota.cc`：按官方流程 `POST /xiaozhi/ota/`，解析 `websocket` / `activation`，并把结果落 NVS |
-| 2 | 对话没有返回 | `listen`/`abort` 报文**不带 `session_id`**，服务端无法把这一轮挂到会话上 | 解析服务端 `hello.session_id` 并在所有出站报文里回传 |
-| 3 | 对话没有返回 | 握手请求缺少 `Protocol-Version` 头；`Client-Id` 用 MAC 冒充（官方要求持久化 UUIDv4） | 补 `Protocol-Version`；首次生成 UUIDv4 并写入 NVS |
-| 4 | 对话没有返回（偶发） | 客户端 **DTX 静音抑制**：判定静音就一个包都不发，服务端收不到音频干脆不回应 | `enable_dtx = false`（按下说话场景下 DTX 只有坏处） |
-| 5 | 屏幕上看不到回复 | 回复正文被绑到了 `llm` 报文上，而官方 `llm` 只带 `emotion`，正文在 **`tts/sentence_start`** | 正文改绑 `tts/sentence_start`（兼容部分服务端的 `llm.text`） |
-| 6 | **闪退（必现）** | 「AI 说话时按 OK 打断」：websocket 任务在 `StartPlayback()`、输入任务在 `StopPlayback()`，两者无锁并发操作同一 codec 句柄与缓冲 → use-after-free → panic 重启 | 音频生命周期只允许控制任务调用；websocket 回调只投事件/写环形缓冲 |
-| 7 | 闪退（栈溢出） | Opus 编解码器临时缓冲开在栈上，**编码约 19KB、解码 >6KB**；原先录音任务栈 24KB 尚可，但拆到多个任务后每处都不够 | 录音/播放共用**一条常驻工作线程**（20KB 栈），半双工天然互斥 |
-| 8 | 闪退（栈溢出） | OTA 的 mbedTLS 握手 + NVS/SPI-Flash 读取调用链很深，控制任务 6KB 栈溢出 | OTA 拆到用完即删的 `xzg_ota` 临时任务（12KB 栈） |
-| 9 | 卡死 | `StopRecording()` 无界自旋等任务退出；录音任务一旦卡在 `portMAX_DELAY` 的 I2S 读里，`esp_websocket_client_stop()` 的 `portMAX_DELAY` 等待也永不返回 | 所有任务等待改为**有界超时**；超时只记日志并继续收尾 |
-| 10 | App 卡在「思考中」按 OK 没反应 | 状态机没有超时：服务端不回 `tts` 就永久停在 Thinking | 加思考/回复超时兜底，超时自动 abort 回 Idle |
+| 1 | Cannot connect to the Xiaozhi backend / no reply to the conversation | The official backend's **OTA config fetch** flow was skipped entirely; `wss://api.tenclass.net/xiaozhi/v1/` and the literal `test-token` were hard-coded, so the server-issued `websocket{url,token,version}` was never obtained | Added `xiaozhi_ota.cc`: follows the official flow with `POST /xiaozhi/ota/`, parses `websocket` / `activation`, and persists the result to NVS |
+| 2 | No reply to the conversation | `listen`/`abort` messages **carry no `session_id`**, so the server cannot attach the turn to a session | Parse the server's `hello.session_id` and echo it in all outbound messages |
+| 3 | No reply to the conversation (intermittent) | The handshake request lacks the `Protocol-Version` header; `Client-Id` used the MAC as a stand-in (the official requirement is a persisted UUIDv4) | Added `Protocol-Version`; generate a UUIDv4 on first run and write it to NVS |
+| 4 | No reply to the conversation (intermittent) | Client-side **DTX silence suppression**: when silence is detected no packet is sent at all, and the server, receiving no audio, simply does not respond | `enable_dtx = false` (in the press-to-talk scenario DTX only does harm) |
+| 5 | Reply not visible on screen | The reply text was bound to the `llm` message, but the official `llm` carries only `emotion`; the text is in **`tts/sentence_start`** | Rebound the text to `tts/sentence_start` (still compatible with `llm.text` from some servers) |
+| 6 | **Crash (always reproducible)** | "Press OK to interrupt while the AI is speaking": the websocket task runs `StartPlayback()` and the input task runs `StopPlayback()`, operating on the same codec handle and buffers concurrently without a lock, causing use-after-free and a panic reboot | Audio lifecycle calls are allowed only from the control task; websocket callbacks only post events / write to the ring buffer |
+| 7 | Crash (stack overflow) | Opus codec temporary buffers are allocated on the stack, **about 19KB for encoding and >6KB for decoding**; the original 24KB recording task stack was enough, but after splitting across several tasks every one fell short | Recording and playback share **one resident worker thread** (20KB stack); half-duplex naturally makes them mutually exclusive |
+| 8 | Crash (stack overflow) | The OTA mbedTLS handshake plus NVS/SPI-Flash reads form a very deep call chain, and the 6KB control task stack overflowed | OTA moved to a temporary `xzg_ota` task (12KB stack) that is deleted after use |
+| 9 | Hang | `StopRecording()` spins unbounded waiting for the task to exit; once the recording task is stuck in an I2S read with `portMAX_DELAY`, the `portMAX_DELAY` wait in `esp_websocket_client_stop()` never returns either | All task waits changed to **bounded timeouts**; on timeout, only log and continue the teardown |
+| 10 | App stuck on "Thinking", OK does nothing | The state machine has no timeout: if the server sends no `tts`, it stays in Thinking forever | Added think/reply timeout fallbacks; on timeout, automatically abort back to Idle |
 
 ---
 
-## 二、关键实测数据（真机 COM3 串口日志）
+## 2. Key measured data (real-device COM3 serial log)
 
-修复过程中值得保留的几个数字，后续改代码时不要踩回去：
+A few numbers worth keeping from the fixing process, so later code changes don't step on them again:
 
-| 项目 | 实测值 | 说明 |
+| Item | Measured value | Notes |
 | --- | --- | --- |
-| Opus **编码**栈需求 | ~19KB | `clt_mdct_forward_c` / `silk_NSQ_c`；8KB 栈溢出错 6040 字节 |
-| Opus **解码**栈需求 | >6KB | `quant_all_bands`；4KB 栈溢出错 1320 字节 |
-| Opus 编码器**堆**占用 | ~23KB | 每轮开/关，把它还给堆 |
-| 服务端下发采样率 | **24000 Hz** | 解码器与 codec 必须按 24kHz 打开，否则音调/语速全错 |
-| 服务端回声 `frame_duration` | 跟随客户端 | 客户端报多少，服务端 `hello` 就回多少 |
-| 说话时可用堆 | ~14KB | 编码器 + TLS 同时在线，这是最紧的时刻 |
-| 回复时可用堆 | ~20KB | 编码器已释放，解码器上线 |
+| Opus **encode** stack requirement | ~19KB | `clt_mdct_forward_c` / `silk_NSQ_c`; an 8KB stack overflowed by 6040 bytes |
+| Opus **decode** stack requirement | >6KB | `quant_all_bands`; a 4KB stack overflowed by 1320 bytes |
+| Opus encoder **heap** usage | ~23KB | Opened/closed each turn, returning it to the heap |
+| Server-issued sample rate | **24000 Hz** | The decoder and codec must be opened at 24kHz, otherwise pitch and speed are all wrong |
+| Server-echoed `frame_duration` | Follows the client | Whatever the client reports, the server's `hello` echoes back |
+| Available heap while speaking | ~14KB | Encoder and TLS both online; this is the tightest moment |
+| Available heap while replying | ~20KB | Encoder released, decoder online |
 
-**帧长选择**：客户端按 **60ms**、编码侧固定 **16kHz** 单声道上报。
-试过 20ms 与 SILK(VOIP) 编码，服务端完全不回应（已回退），
-且帧长对编码栈需求几乎没有影响（CELT 的临时缓冲大小与帧长关系不大）。
+**Frame length choice**: the client reports at **60ms** frames, with the encoder side fixed at **16kHz** mono.
+20ms and SILK (VOIP) encoding were tried, and the server did not respond at all (reverted),
+and frame length has almost no effect on the encoder stack requirement (the CELT temporary buffer size barely depends on frame length).
 
-**已知的良性日志**：
+**Known benign logs**:
 
-- `tts state=sentence_end (ignored)` —— 新版服务端会发这个状态，只表示一句念完，
-  不影响音频流与状态机，忽略是正确行为。
-- `Playback ring full (...), frame dropped` —— 服务端突发下发超过缓冲余量。
-  正常路径下不应出现；若频繁出现，可调大 `kPlayRingCap`（代价是等量堆）。
-- `WebSocket error, type=0/1` 后自动 `letting it auto-reconnect` —— 网络抖动。
-  已在真机验证：断线→录音自动收尾→客户端自动重连→重新握手→继续对话，
-  全程不重启、不需要用户干预。
+- `tts state=sentence_end (ignored)`: newer servers send this state, meaning only that one sentence has finished;
+  it does not affect the audio stream or the state machine, and ignoring it is correct behavior.
+- `Playback ring full (...), frame dropped`: the server sent a burst exceeding the buffer headroom.
+  It should not appear on the normal path; if it appears frequently, increase `kPlayRingCap` (at the cost of an equal amount of heap).
+- `WebSocket error, type=0/1` followed by an automatic `letting it auto-reconnect`: network jitter.
+  Verified on a real device: disconnect, recording automatically wraps up, client automatically reconnects, handshake again, conversation continues,
+  with no reboot and no user intervention throughout.
 
 
 ---
 
-## 三、架构：单所有者控制任务
+## 3. Architecture: a single-owner control task
 
 ```text
-按键任务(3072栈) ──post──┐
-                        ├─► xzg_ctl (控制任务, 6KB栈)
-websocket 任务(5KB栈) ──┐│     * 唯一的 Protocol::Start/Stop/Trigger* 调用者
-   └ 回调只做两件事：    ││     * 唯一的 AudioService Start*/Stop* 调用者
-       · 事件写队列 ─────┘│     * 唯一的 ui_* 调用者
-       · Opus 塞环形缓冲 ─┘     * 录音帧的发送者（drain_audio_tx）
+Key task (3072 stack) ──post──┐
+                              ├─► xzg_ctl (control task, 6KB stack)
+websocket task (5KB stack) ──┐│     * the only caller of Protocol::Start/Stop/Trigger*
+   └ callbacks do only two things:   * the only caller of AudioService Start*/Stop*
+       · write events to queue ─────┘│     * the only caller of ui_*
+       · push Opus into ring buffer ─┘     * the sender of recording frames (drain_audio_tx)
                                     │
-xzg_ota (临时, 12KB栈) ── OTA 的 HTTPS 握手，用完即删
-xzg_audio (常驻, 20KB栈) ── 录音编码 / 播放解码（半双工，共用一份栈）
+xzg_ota (temporary, 12KB stack) ── OTA HTTPS handshake, deleted after use
+xzg_audio (resident, 20KB stack) ── recording encode / playback decode (half-duplex, shared single stack)
 ```
 
-要点：
+Key points:
 
-- **websocket 回调里绝不做阻塞工作**（不解码、不写 I2S、不加锁等待）。
-  旧实现把 `PlayAudioFrame()`（解码 + 阻塞式 I2S 写）直接放在回调里，
-  等于让网络任务替音频干活。
-- **`Protocol` 是函数内静态对象，永不析构**，从根上消除「回调访问已销毁对象」。
-- **`xzg_audio` 在应用启动时创建**：那时堆新鲜连续（最大块 50KB+），20KB 连续栈
-  一定分配得到；等用户按下说话再申请，堆已被 TLS/OTA 打散（最大块只剩 7KB），
-  必然失败。
-- **切走时 `Deinit()` 把常驻线程和缓冲全部还给堆**：退出小智后
-  `free heap` 回到 80KB，不侵占收音机 / Codex 等其它应用。
-- **Opus 编码器常驻（2026-09-14 内存修复）**：编码器需要 ~25KB 连续块（实测
-  largest=22528/23552 时 open 失败 ret:-7），而会话中后段 largest 只有 4~9KB ——
-  用时开/用完关在碎堆下必然失败。现在 `Init()` 时 `EnsureEncoder()` 开好常驻、
-  `StopRecording()` 不再关；播放时若解码器开不出来，临时放掉编码器
-  （`enc_dropped_for_playback_`），播完 `StopPlayback()/AbortPlayback()` 立即补回。
-  解码器收尾未确认 idle 时保留句柄（旧代码置空 = 永久泄漏 ~13KB）。
-- **配套的全局内存腾挪**（否则常驻编码器会把 TLS 握手饿死
-  `Dynamic Impl: alloc(3778) failed`）：首页 `s_portrait_a8`（14.4KB A8 人像缓冲）
-  与开机铃 `s_note`（3.2KB）从 .bss 改为用时分配、用完归还；小机会话内
-  free 由 ~30KB 升至 ~48KB。真机验证：3 轮对话录音/播放全通，退出后
-  free=99.5KB/largest=51.2KB 无泄漏（`_diag/xz_memfix4.log`）。
+- **Never do blocking work in a websocket callback** (no decoding, no I2S writes, no lock waits).
+  The old implementation put `PlayAudioFrame()` (decode + blocking I2S write) directly in the callback,
+  which made the network task do the audio task's work.
+- **`Protocol` is a function-local static object that is never destructed**, which eliminates "callback accesses a destroyed object" at the root.
+- **`xzg_audio` is created at app startup**: at that point the heap is fresh and contiguous (largest block 50KB+), so a contiguous 20KB stack
+  is guaranteed to be allocated; if requested only when the user presses to talk, the heap has already been fragmented by TLS/OTA (largest block only 7KB),
+  and allocation would inevitably fail.
+- **On switching away, `Deinit()` returns the resident thread and all buffers to the heap**: after leaving Xiaozhi,
+  `free heap` returns to 80KB, so it does not encroach on other apps such as Radio / Codex.
+- **Opus encoder kept resident (2026-09-14 memory fix)**: the encoder needs a ~25KB contiguous block (measured:
+  open failed with ret:-7 at largest=22528/23552), while in the later part of a session largest is only 4~9KB;
+  opening on use and closing after use inevitably fails on a fragmented heap. Now `Init()` calls `EnsureEncoder()` to open it and keep it resident,
+  and `StopRecording()` no longer closes it; if the decoder cannot be opened during playback, the encoder is temporarily released
+  (`enc_dropped_for_playback_`) and restored immediately after `StopPlayback()/AbortPlayback()` finishes playing.
+  When decoder teardown is not confirmed idle, the handle is kept (the old code nulled it = a permanent ~13KB leak).
+- **Accompanying global memory shuffling** (otherwise the resident encoder starves the TLS handshake:
+  `Dynamic Impl: alloc(3778) failed`): the Home page `s_portrait_a8` (14.4KB A8 portrait buffer)
+  and the boot chime `s_note` (3.2KB) were changed from .bss to allocate-on-use and return-after-use; free heap
+  during a Xiaozhi session rose from ~30KB to ~48KB. Verified on a real device: 3 conversation rounds of recording/playback all work, and after exit
+  free=99.5KB/largest=51.2KB with no leak (`_diag/xz_memfix4.log`).
 
 ---
 
-## 四、文件职责
+## 4. File responsibilities
 
-| 文件 | 职责 |
+| File | Responsibility |
 | --- | --- |
-| `app_xiaozhi.cc` | 单所有者控制任务、状态机、超时兜底、按键事件、录音帧发送 |
-| `xiaozhi_protocol.{h,cc}` | WebSocket v3：请求头、`hello` 握手、`session_id`、分片重组、报文解析 |
-| `xiaozhi_audio.{h,cc}` | ES8311 半双工音频：常驻工作线程、环形缓冲、有界等待、内存闸门 |
-| `xiaozhi_ota.{h,cc}` | 官方后台 OTA/激活：换 `websocket{url,token,version}`、显示激活码 |
-| `xiaozhi_store.{h,cc}` | NVS 配置读写（命名空间 `xiaozhi`，兼容官方 `websocket`） |
-| `xiaozhi_ui.{h,cc}` | LVGL 界面；所有入口在锁内二次校验控件指针 |
+| `app_xiaozhi.cc` | Single-owner control task, state machine, timeout fallbacks, key events, recording frame sending |
+| `xiaozhi_protocol.{h,cc}` | WebSocket v3: request headers, `hello` handshake, `session_id`, fragment reassembly, message parsing |
+| `xiaozhi_audio.{h,cc}` | ES8311 half-duplex audio: resident worker thread, ring buffer, bounded waits, memory gate |
+| `xiaozhi_ota.{h,cc}` | Official backend OTA/activation: fetch `websocket{url,token,version}`, show the activation code |
+| `xiaozhi_store.{h,cc}` | NVS config read/write (namespace `xiaozhi`, compatible with the official `websocket`) |
+| `xiaozhi_ui.{h,cc}` | LVGL UI; all entry points re-validate the widget pointers under the lock |
 
 ---
 
-## 五、配置项
+## 5. Configuration
 
-NVS 命名空间 `xiaozhi`（可直接用 `nvs_flash` 工具或后续加串口命令写入）：
+NVS namespace `xiaozhi` (can be written directly with the `nvs_flash` tool or with serial commands added later):
 
-| key | 默认 | 说明 |
+| key | Default | Description |
 | --- | --- | --- |
-| `ws_url` | 空 | 自建服务端时填 `ws://192.168.x.x:8000/xiaozhi/v1/` |
-| `token` | 空 | 自建服务端一般留空；官方后台由 OTA 自动写入 |
-| `version` | 3 | 协议版本 |
-| `ota_url` | `https://api.tenclass.net/xiaozhi/ota/` | 自建服务端改这里 |
-| `client_id` | 首次自动生成 | 持久化 UUIDv4，**不要手改**（换了等于换设备身份） |
+| `ws_url` | empty | For a self-hosted server, set to `ws://192.168.x.x:8000/xiaozhi/v1/` |
+| `token` | empty | Usually left empty for a self-hosted server; for the official backend it is written automatically by OTA |
+| `version` | 3 | Protocol version |
+| `ota_url` | `https://api.tenclass.net/xiaozhi/ota/` | Change this for a self-hosted server |
+| `client_id` | auto-generated on first run | Persisted UUIDv4, **do not edit by hand** (changing it means changing the device identity) |
 
-优先级：**OTA 下发 > `xiaozhi` 命名空间 > 官方同名 `websocket` 命名空间 > 内置默认**。
-缓存 10 分钟；连续 3 次连接失败会重新拉取。
+Priority: **OTA-issued > `xiaozhi` namespace > official same-name `websocket` namespace > built-in defaults**.
+Cached for 10 minutes; after 3 consecutive connection failures it is fetched again.
 
-### 官方后台（xiaozhi.me）
+### Official backend (xiaozhi.me)
 
-设备首次连接会 POST OTA 接口：
+On first connection the device POSTs to the OTA endpoint:
 
-- 若返回 `activation{code,message}` → 屏幕显示「待激活 绑定码 XXXXXX」，
-  去 xiaozhi.me 后台添加本设备的 MAC 即可，绑定后每 30 秒自动重试，**不需要重启**。
-- 若返回 `websocket{url,token,version}` → 已绑定，自动连上开始对话。
+- If `activation{code,message}` is returned, the screen shows "Pending activation, binding code XXXXXX";
+  add this device's MAC in the xiaozhi.me console. After binding it retries automatically every 30 seconds, **no reboot needed**.
+- If `websocket{url,token,version}` is returned, the device is already bound and connects automatically to start conversing.
 
-设备 MAC 可以在小智 App 界面上直接看到（顶栏下方第一行「设备 MAC: xx:xx:...」）。
+The device MAC is visible directly on the Xiaozhi app screen (the first line below the top bar, "Device MAC: xx:xx:...").
 
-### 自建服务端（xiaozhi-esp32-server）
+### Self-hosted server (xiaozhi-esp32-server)
 
-把 NVS 里的 `ota_url` 指向自建服务端的 OTA 地址，或直接写 `ws_url` + `version`。
+Point `ota_url` in NVS at the self-hosted server's OTA address, or write `ws_url` + `version` directly.
 
 ---
 
-## 六、按键
+## 6. Keys
 
-| 按键 | 状态 | 动作 |
+| Key | State | Action |
 | --- | --- | --- |
-| OK 单击 | 未连接 | 立即重试连接 |
-| OK 单击 | 待机 | 开始说话 |
-| OK 单击 | 聆听中 | 结束说话，上传并等待回复 |
-| OK 单击 | 回复中 | 打断（先掐声音再通知服务端） |
-| OK 单击 | 思考中 | 忽略（有 25 秒超时兜底） |
-| 音量+ / 音量− | 任意 | 音量 ±10% |
-| 长按 OK | 任意 | 返回启动器（由全局处理器执行） |
+| OK single press | Disconnected | Retry the connection immediately |
+| OK single press | Idle | Start speaking |
+| OK single press | Listening | End speaking, upload and wait for the reply |
+| OK single press | Replying | Interrupt (cut the sound first, then notify the server) |
+| OK single press | Thinking | Ignored (a 25-second timeout is the fallback) |
+| Volume+ / Volume- | Any | Volume ±10% |
+| OK long press | Any | Return to the launcher (handled by the global handler) |

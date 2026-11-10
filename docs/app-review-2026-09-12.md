@@ -1,183 +1,183 @@
-# 应用评估：AI 语音 与 AI 设备（2026-09-12）
+# App review: AI Voice and AI Device (2026-09-12)
 
-评估对象（Launcher 中文名 → 代码位置）：
+Subjects of the review (Launcher name → code location):
 
-| 板块名 | App ID | 代码 | 规模 |
+| Section name | App ID | Code | Size |
 | --- | --- | --- | --- |
-| AI语音 | `APP_ID_VOICE`「随身 AI 语音」 | `main/apps/voice/` | 28 文件 ≈ 4.4k 行 |
-| AI设备 | `APP_ID_CODEX`「Codex 陪伴精灵」 | `main/apps/codex/` | 38 文件 ≈ 38.5k 行（其中 `buddy_font_16.c` 占 31k 行，被首页复用） |
+| AI Voice | `APP_ID_VOICE` "Portable AI Voice" | `main/apps/voice/` | 28 files ≈ 4.4k lines |
+| AI Device | `APP_ID_CODEX` "Codex Companion Sprite" | `main/apps/codex/` | 38 files ≈ 38.5k lines (of which `buddy_font_16.c` accounts for 31k lines and is reused by Home) |
 
 ---
 
-## 一、AI 语音（apps/voice）
+## 1. AI Voice (apps/voice)
 
-### 1.1 它现在到底是什么
+### 1.1 What it actually is today
 
-**纯「哑终端 + 外挂电脑」方案**，设备端没有任何 ASR。
+**A pure "dumb terminal + external computer" scheme**; the device has no ASR at all.
 
 ```
-按住 UP → 播 440Hz 滴声 → 滴声结束才真正开始采集
-   → bsp_audio_read 每 100ms 取 3200B(16kHz/16bit/mono)
-   → IMA ADPCM 4:1 压成 804B → BLE notify(2M PHY, DLE 251, 分 5 片)
-   → 电脑端 companion 做 ASR/LLM/注入
-   → 结果下行：transcript / agent.status / agent.approval_request
+Hold UP → play a 440Hz beep → capture only actually starts after the beep ends
+   → bsp_audio_read takes 3200B every 100ms (16kHz/16bit/mono)
+   → IMA ADPCM 4:1 compresses to 804B → BLE notify (2M PHY, DLE 251, split into 5 fragments)
+   → the computer-side companion does ASR/LLM/injection
+   → results come back down: transcript / agent.status / agent.approval_request
 ```
 
-关键证据：
-- `audio_streamer.c:405` 编码 ADPCM → `ble_audio_notify_audio`，804B/100ms = 8KB/s
-- `app_voice.cc:80-89` 上行 `{"event":"voice.start","audio":"ima_adpcm"}` / `voice.end` / `status{drop}`
-- `app_protocol.c:133-136` 下行只回 ≤128B 文本；**文本注入已退役到 PC**（`app_types.h:96`）
+Key evidence:
+- `audio_streamer.c:405` encodes ADPCM → `ble_audio_notify_audio`, 804B/100ms = 8KB/s
+- `app_voice.cc:80-89` uplink `{"event":"voice.start","audio":"ima_adpcm"}` / `voice.end` / `status{drop}`
+- `app_protocol.c:133-136` the downlink only returns text of ≤128B; **text injection has been retired to the PC** (`app_types.h:96`)
 
-### 1.2 必须知道的三个硬伤
+### 1.2 Three hard flaws you must know about
 
-**① 离线 100% 不可用，而且 companion 不在仓库里**
-`app_state.c:176` 未连接时直接 toast `OFFLINE - PTT blocked`。companion 是
-`companion/relay.py` + `companion/adpcm.py`（见 `audio_streamer.c:16`、`adpcm.c:5` 注释），
-**本仓库没有**。连系统时钟都要电脑下发 `time.set`。
+**1. 100% unusable offline, and the companion is not in the repo**
+When not connected, `app_state.c:176` directly toasts `OFFLINE - PTT blocked`. The companion is
+`companion/relay.py` + `companion/adpcm.py` (see the comments at `audio_streamer.c:16` and `adpcm.c:5`),
+and **this repo does not have it**. Even the system clock needs the computer to send `time.set`.
 
-**② `APP_EV_TICK` 有处理无生产者 → 所有超时失效（功能性 bug）**
-`app_state.c:725` 是全仓唯一出现处。后果：
-- 20s 息屏不触发
-- **30s 转写超时不触发**
-- **60s PTT 兜底不触发** —— 按住不放会永远录下去
+**2. `APP_EV_TICK` has a handler but no producer → all timeouts are dead (functional bug)**
+`app_state.c:725` is the only place it appears in the whole repo. Consequences:
+- The 20s screen-off never fires
+- **The 30s transcription timeout never fires**
+- **The 60s PTT safety net never fires**: holding the key down records forever
 
-这条无论选哪个方案都要先修。
+This must be fixed first regardless of which option is chosen.
 
-**③ 与 xiaozhi 两套音频栈重复造轮子**
-两者都 `bsp_audio_read` 16kHz/16bit 单声道、都按键触发无唤醒词；但 voice 走
-ADPCM+BLE+电脑 ASR，xiaozhi 走 Opus 60ms + WebSocket + 云端 STT。
-codec 生命周期、ring、状态机、按键语义**各写一套，无共享音频服务层**。
+**3. Reinventing the wheel with two audio stacks alongside xiaozhi**
+Both use `bsp_audio_read` at 16kHz/16bit mono, and both are key-triggered with no wake word; but voice goes through
+ADPCM+BLE+computer-side ASR, while xiaozhi goes through Opus 60ms + WebSocket + cloud STT.
+The codec lifecycle, ring, state machine and key semantics are **written twice, with no shared audio service layer**.
 
-**④ 为了用 BLE，进 voice 会停掉 Wi-Fi（直接损害其他应用）**
+**4. To use BLE, entering voice stops Wi-Fi (directly harming other apps)**
 
-`app_voice.cc:222` 原文：
+Original text at `app_voice.cc:222`:
 ```c
 // Voice transport is BLE/USB; release Wi-Fi runtime buffers while active.
 suspend_wifi_driver();
 ```
-与 codex（`app_codex.cc:135`）是同一个模式。后果：进语音 → Wi-Fi 停 → 天气/时间同步/
-上传全断；退出 → Wi-Fi 重连（耗时、耗电、可能失败）。**首页的天气与时钟都依赖 Wi-Fi**，
-所以每次用完语音回首页，天气都要等重新连上才能更新。
+It is the same pattern as codex (`app_codex.cc:135`). Consequences: enter voice → Wi-Fi stops → weather/time sync/
+upload all cut off; exit → Wi-Fi reconnects (slow, power-hungry, may fail). **Both the weather and the clock on Home depend on Wi-Fi**,
+so every time you go back to Home after using voice, the weather has to wait for the reconnect before it can update.
 
-这是「BLE 选型」的连带伤害，不是 voice 单独的问题。
+This is collateral damage from "choosing BLE", not a problem of voice alone.
 
-**⑤ BLE 让整机踩在内存悬崖上（稳定运行的最大威胁）**
+**5. BLE puts the whole device on a memory cliff (the biggest threat to stable operation)**
 
-`ble_audio.c:186-189` 原文注释：
-> `nimble_port_init(controller)` 吃掉 **~44.7KB** heap 后，剩余 largest 仅 **~7KB**，
-> 动态栈分配与 host 任务(4096B) 争抢，实测导致 host 任务创建失败 → 不广播、连不上。
-> **5120 使 heap 少了 1KB → `ble_hs_start` 分配失败重启循环**
+Original comment at `ble_audio.c:186-189`:
+> After `nimble_port_init(controller)` eats **~44.7KB** of heap, the remaining largest block is only **~7KB**,
+> and dynamic stack allocation competes with the host task (4096B); measured, this makes host task creation fail → no advertising, cannot connect.
+> **5120 leaves the heap 1KB smaller → `ble_hs_start` allocation fails in a reboot loop**
 
-`audio_streamer.c:83-84` 亦记：编码器 + NimBLE controller 后 **heap 只剩 ~3KB**，
-所以 worker 栈必须静态化到 `.bss`（动态分配会失败）。同处还留着一句历史结论：
-> 「Opus 时代一路加到 16384 仍崩，根因是**堆耗尽**而非栈」
+`audio_streamer.c:83-84` also records that after the encoder + NimBLE controller, **the heap is only ~3KB**,
+so the worker stack must be made static in `.bss` (dynamic allocation would fail). A historical conclusion is also left at the same place:
+> "In the Opus era it was raised all the way to 16384 and still crashed; the root cause is **heap exhaustion**, not the stack"
 
-系统对 1KB 量级的内存变动都敏感 → 这是「稳定运行」的头号风险源。
+The system is sensitive to memory changes on the order of 1KB, which makes this the number-one risk source for "stable operation".
 
-附带：`audio_streamer_peak()` 算了峰值却无人调用 → **录音界面没有波形**；
-USB 通道是半成品（`mode.c:13-19` `mode_channel_up(USB)` 恒 false，全仓无 `usb_link`）。
-另有「射频腐蚀导致幽灵按键」，`app_state.c:10-72` 为此堆了 5 组 mV 门禁——
-根因同样是 BLE 射频，去掉 BLE 这个坑一并消失。
+Also: `audio_streamer_peak()` computes the peak but nobody calls it → **the recording screen has no waveform**;
+the USB channel is half-finished (`mode.c:13-19` `mode_channel_up(USB)` is always false, and the whole repo has no `usb_link`).
+There is also "RF corrosion causing phantom key presses", for which `app_state.c:10-72` piled up 5 sets of mV gates;
+the root cause is again the BLE radio, and removing BLE makes this pitfall disappear too.
 
-### 1.3 定位更正：它是「无线麦克风」，不是语音助手
+### 1.3 Positioning correction: it is a "wireless microphone", not a voice assistant
 
-> 2026-09-12 用户澄清：诉求是**设备当麦克风 → 电脑端 ASR → 文本粘贴**。
-> 追求**极致轻量化**，但要求**各个应用能正常稳定运行**。
+> 2026-09-12 user clarification: the requirement is **device as microphone → computer-side ASR → text paste**.
+> Pursue **extreme lightness**, but require **every app to run normally and stably**.
 
-这个定位推翻了下面「转投小智 MCP」的初稿结论。定位变了，答案就变了。
+This positioning overturns the early-draft conclusion below about "switching to Xiaozhi MCP". When the positioning changes, the answer changes.
 
-### 1.4 先排除两条「看起来更优雅」的路
+### 1.4 First rule out two paths that "look more elegant"
 
-**① 设备直接被电脑认成 USB 麦克风（零 companion）→ C3 硬件不支持**
+**1. The device is recognized directly by the computer as a USB microphone (zero companion) → the C3 hardware does not support it**
 
-乐鑫官方 FAQ 与 esp-iot-solution 外设支持矩阵：
+Espressif's official FAQ and the esp-iot-solution peripheral support matrix:
 
-- ESP32-C3 只有 **USB-Serial-JTAG** 外设：「**无法自定义描述符**」、
-  「不支持二次开发修改 USB 功能或描述符」
-- USB-OTG（能做 USB Audio / HID / MSC）只有 S2 / S3 / P4 有；C3 那一栏是 X
+- The ESP32-C3 only has the **USB-Serial-JTAG** peripheral: "**custom descriptors are not possible**",
+  and "secondary development to modify USB functions or descriptors is not supported"
+- USB-OTG (which can do USB Audio / HID / MSC) exists only on the S2 / S3 / P4; the C3 column is X
 
-→ **C3 做不了 UAC 麦克风，companion 必须存在。这是硬件定死的。**
-（长期若换 ESP32-S3，这条路能让 companion 彻底消失。）
+→ **The C3 cannot be a UAC microphone, so the companion must exist. This is fixed by the hardware.**
+(If the project moves to the ESP32-S3 in the long run, this path would let the companion disappear entirely.)
 
-**② 设备端本地 ASR → 不可能**
+**2. On-device local ASR → impossible**
 
-ESP-SR 在无 PSRAM 的 C3 上只支持 WakeNet9s 唤醒词，**不支持 MultiNet 命令词**，
-自由说的连续识别更无从谈起。
+On a C3 without PSRAM, ESP-SR only supports the WakeNet9s wake word and **does not support MultiNet command words**,
+let alone continuous recognition of free speech.
 
-**结论**：「设备采音 → 传给电脑 → 电脑 ASR + 粘贴」**本身就是这块硬件上的最优解**。
-问题不在「做什么」，而在「**用什么通道传**」。
+**Conclusion**: "device captures audio → sends to the computer → computer ASR + paste" **is itself the optimal solution on this hardware**.
+The problem is not "what to do" but "**which channel to transmit over**".
 
-### 1.5 真正的优化点：把通道从 BLE 换成 Wi-Fi
+### 1.5 The real optimization: switch the channel from BLE to Wi-Fi
 
-| 维度 | BLE（现状） | **Wi-Fi UDP（建议）** |
+| Dimension | BLE (current) | **Wi-Fi UDP (recommended)** |
 | --- | --- | --- |
-| 协议栈内存 | NimBLE controller **~44.7KB**，剩余最大连续块仅 ~7KB | **0** —— lwIP 已在跑（天气/时间/上传都在用） |
-| 对其他应用 | **必须 `suspend_wifi_driver()`**（`app_voice.cc:222`），天气/时间/上传全停 | 无需停，各应用共存 |
-| 稳定性 | 栈 4096→5120（多 1KB）即 `ble_hs_start` 失败**重启循环** | 无此风险 |
-| 带宽 | 8KB/s（2M PHY + DLE 251，mbuf 池背压是真瓶颈） | 局域网 Mbps 级，极富余 |
-| 端到端延迟 | 100ms/包节奏 | 更低，但**瓶颈在 ASR 而非传输**，感知改善有限 |
-| 射频干扰 | 有（幽灵按键，`app_state.c` 为此堆了 5 组 mV 门禁） | 无 |
-| 代码量 | `ble_audio.c` 747 行 + 一整套 BLE 封装 | 一个 UDP socket，几十行 |
-| 前提 | 配对即可，不要求同网 | **设备与电脑需在同一局域网** |
+| Protocol stack memory | NimBLE controller **~44.7KB**, remaining largest contiguous block only ~7KB | **0**: lwIP is already running (weather/time/upload all use it) |
+| Effect on other apps | **Must `suspend_wifi_driver()`** (`app_voice.cc:222`); weather/time/upload all stop | No need to stop; apps coexist |
+| Stability | Stack 4096→5120 (1KB more) makes `ble_hs_start` fail in a **reboot loop** | No such risk |
+| Bandwidth | 8KB/s (2M PHY + DLE 251; mbuf pool backpressure is the real bottleneck) | LAN Mbps level, very ample |
+| End-to-end latency | 100ms/packet cadence | Lower, but **the bottleneck is ASR, not transport**, so the perceived improvement is limited |
+| RF interference | Yes (phantom key presses; `app_state.c` piled up 5 sets of mV gates for it) | None |
+| Code size | `ble_audio.c` 747 lines + a whole BLE wrapper | One UDP socket, a few dozen lines |
+| Prerequisite | Pairing is enough, same network not required | **The device and the computer must be on the same LAN** |
 
-**关键洞察：这条通道其实早就建好了。** 首页的头像上传就跑在 Wi-Fi 上
-（httpd，真机已验证 `http://192.168.5.4`）。设备 ↔ 电脑的 IP 通路已经存在，
-语音只是再加一个 UDP 端口——几乎零新增基础设施。
+**Key insight: this channel was actually built long ago.** The Home avatar upload already runs over Wi-Fi
+(httpd, verified on a real device at `http://192.168.5.4`). The device ↔ computer IP path already exists,
+and voice only needs one more UDP port, with almost zero new infrastructure.
 
-**代价与应对**：
-- 需同局域网：你的场景（人在电脑前说话）天然成立
-- 需知道对端 IP：用 UDP 广播 + companion 应答做自动发现；或沿用上传页那种
-  「设备开服务、电脑来连」的既有模式
-- companion 改接收端：BLE notify → UDP socket，工作量不大
+**Costs and responses**:
+- Needs the same LAN: your scenario (a person speaking in front of the computer) satisfies this naturally
+- Needs to know the peer IP: use UDP broadcast + companion reply for automatic discovery; or reuse the existing upload-page pattern of
+  "the device opens a service, the computer connects"
+- The companion changes its receiving end: BLE notify → UDP socket; the workload is small
 
-### 1.6 建议：保留什么、改什么
+### 1.6 Recommendation: what to keep, what to change
 
-**保留（这些设计是对的，别动）**
+**Keep (these designs are right, don't touch them)**
 
-- **ADPCM**：`adpcm.h:25-28` 块头 4B + 800B，**单块独立可解** → 丢包只影响一块，
-  天然抗 UDP 丢包。比 Opus 更契合「极致轻量化」——历史也验证过：
-  `audio_streamer.c:90` 留着原话「Opus 时代一路加到 16384 仍崩，根因是堆耗尽而非栈」
-- 按键即按即说的交互
-- companion 负责 ASR + 粘贴（硬件决定必须如此）
+- **ADPCM**: `adpcm.h:25-28` block header 4B + 800B, **each block independently decodable** → packet loss affects only one block,
+  naturally resistant to UDP loss. It fits "extreme lightness" better than Opus; history has confirmed this too:
+  `audio_streamer.c:90` keeps the original words "In the Opus era it was raised all the way to 16384 and still crashed; the root cause is heap exhaustion, not the stack"
+- The press-and-speak key interaction
+- The companion handles ASR + paste (the hardware dictates this)
 
-**改（按性价比排序）**
+**Change (ordered by cost-effectiveness)**
 
-1. **通道 BLE → Wi-Fi UDP** —— 一次换掉 44.7KB 常驻 + 被迫停 Wi-Fi +
-   重启循环风险 + 幽灵按键，**同时命中「轻量化」与「稳定运行」两个目标**
-2. 顺带删掉 `suspend_wifi_driver()` 调用
-3. 删 `ble_audio.c`(747) + USB 半成品 `mode.c` + 各类死代码
-   → 估算 4.4k 行可降到 ~1.5k 行
-4. **补 `APP_EV_TICK`**（P0，与换通道互相独立，无论如何都要修）
-5. 接上 `audio_streamer_peak()`，录音界面出波形
+1. **Channel BLE → Wi-Fi UDP**: one move removes the 44.7KB resident cost + the forced Wi-Fi stop +
+   the reboot-loop risk + phantom key presses, **hitting both "lightweight" and "stable operation" goals at once**
+2. Also delete the `suspend_wifi_driver()` call
+3. Delete `ble_audio.c` (747) + the half-finished USB `mode.c` + assorted dead code
+   → estimated to drop 4.4k lines to ~1.5k lines
+4. **Add the missing `APP_EV_TICK` producer** (P0, independent of the channel change, must be fixed either way)
+5. Hook up `audio_streamer_peak()` so the recording screen shows a waveform
 
-**关于「物理审批手刹」**：它和「无线麦克风」是两件事
-（`app_state.c:585-612`，OK=批准 / UP=拒绝 / 无超时 / 常亮不熄屏）。
-你不用就一起砍掉进一步减重；要用就保留——纯状态机，不占额外内存。
+**About the "physical approval handbrake"**: it is a separate matter from the "wireless microphone"
+(`app_state.c:585-612`, OK = approve / UP = reject / no timeout / always on, never sleeps the screen).
+If you don't use it, cut it together for further weight reduction; if you do, keep it: it is a pure state machine and uses no extra memory.
 
-> 注：若 `suspend_wifi_driver()` / `resume_wifi_driver()` 不成对
-> （异常路径提前 return），Wi-Fi 会永久停摆。换 Wi-Fi 通道后这个隐患自动消失。
+> Note: if `suspend_wifi_driver()` / `resume_wifi_driver()` are not paired
+> (an early return on an error path), Wi-Fi stays down permanently. After switching to the Wi-Fi channel this hazard disappears automatically.
 
 ---
 
-## 二、AI 设备（apps/codex）
+## 2. AI Device (apps/codex)
 
-### 2.1 决定性发现：数据链是断的
+### 2.1 Decisive finding: the data chain is broken
 
-这不是「功能弱」，是**收上来的数据根本没进状态机**。
+This is not "weak functionality"; **the received data never enters the state machine at all**.
 
 ```
-buddy_ble.c:369   发出 BUDDY_BLE_EVENT_RX_LINE
+buddy_ble.c:369   emits BUDDY_BLE_EVENT_RX_LINE
         ↓
-app_codex.cc:112  on_codex_ble_event() 只处理 CONNECTED / DISCONNECTED
-        ↓  ✗ 没有 else 分支处理 RX_LINE
-buddy_orchestrator_process_rx()   ← 全 main/ 下零调用方
-                                    （只有 buddy_orchestrator.c:42 定义
-                                      和 .h:29 声明，Grep 已确认）
+app_codex.cc:112  on_codex_ble_event() only handles CONNECTED / DISCONNECTED
+        ↓  ✗ no else branch handles RX_LINE
+buddy_orchestrator_process_rx()   ← zero callers under all of main/
+                                    (only the definition at buddy_orchestrator.c:42
+                                      and the declaration at .h:29; confirmed by Grep)
         ↓  ✗
-buddy_protocol_parse() 永不执行 → s_codex_state 在 init 后再无写入
+buddy_protocol_parse() never executes → s_codex_state is never written after init
 ```
 
-**已验证**（`app_codex.cc:112-119`，原文）：
+**Verified** (`app_codex.cc:112-119`, original text):
 ```c
 static void on_codex_ble_event(const buddy_ble_event_t *event, void *context) {
     (void)context;
@@ -189,292 +189,292 @@ static void on_codex_ble_event(const buddy_ble_event_t *event, void *context) {
 }
 ```
 
-**连带后果**：
-- `tokens` / `tokens_today` **恒为 0**，与 BLE 是否连接无关
-- 任务监听 / 审批弹窗 / 庆祝动效 **永不触发**
-- `buddy_app_logic.c`（544 行）纯死代码；`buddy_screenshot.c` 未进 CMakeLists
-- `app_codex.cc:190-210` —— **OK / UP / DOWN 三个键全部只播音效**，
-  UI 上写的「上键切页 / 下键拒绝 / 确定允许」（`buddy_ui.c:379`）未实现
-- Home 提示语恒显示「请在电脑连接 Codex Buddy」（`buddy_ui.c:322-323`）
+**Knock-on consequences**:
+- `tokens` / `tokens_today` are **always 0**, regardless of whether BLE is connected
+- Task listening / approval popups / celebration animations **never trigger**
+- `buddy_app_logic.c` (544 lines) is pure dead code; `buddy_screenshot.c` is not in CMakeLists
+- `app_codex.cc:190-210`: **all three keys OK / UP / DOWN only play sound effects**,
+  and the "Up switches page / Down rejects / OK allows" written in the UI (`buddy_ui.c:379`) is not implemented
+- The Home hint always shows "Please connect Codex Buddy on your computer" (`buddy_ui.c:322-323`)
 
-**对首页的直接影响（比想象中糟）**：
-`s_usage_ready` 在 `codex_app_start()` 后置位（`app_codex.cc:164`），之后**不再复位**。
-所以用户只要进过一次 codex app，首页那两张统计卡就从 `--` 变成**永久显示 `0`**——
-看着像「有数据但是 0」，比 `--` 更具误导性。
+**Direct effect on Home (worse than expected)**:
+`s_usage_ready` is set after `codex_app_start()` (`app_codex.cc:164`) and is **never reset afterwards**.
+So as soon as the user has entered the codex app once, the two stat cards on Home change from `--` to **permanently showing `0`**:
+it looks like "there is data but it is 0", which is more misleading than `--`.
 
-### 2.2 内嵌到首页的风险
+### 2.2 Risks of embedding it in Home
 
-| 风险 | 说明 | 级别 |
+| Risk | Description | Level |
 | --- | --- | --- |
-| **Wi-Fi 与 BLE 架构冲突** | `app_codex.cc:135` `suspend_wifi_driver()`——codex 启动就停 Wi-Fi 给 38KB canvas 腾地方。内嵌首页 = **要么永久断 Wi-Fi**（天气/时间/上传全废），**要么 38KB + Wi-Fi buffer 共存大概率 OOM** | 🔴 架构级死结 |
-| **常驻 42KB+** | 38KB I4 canvas（`buddy_ui.c:18,505`）+ 6KB 任务栈 + 4KB NimBLE host 栈。从「按需占用」变「永久占用」 | 🔴 |
-| **CPU 常驻** | 5fps 全屏 38KB memset + 逐像素重绘（`buddy_ui.c:485,558`），与首页刷新抢锁、抢单核 | 🟠 |
-| **收益为零** | 搬过去的只是「永远 0 的积分 + 一只 BSOD 精灵」，得不到任何新能力 | 🔴 |
+| **Wi-Fi vs BLE architecture conflict** | `app_codex.cc:135` `suspend_wifi_driver()`: codex stops Wi-Fi at startup to make room for the 38KB canvas. Embedding into Home = **either Wi-Fi is cut permanently** (weather/time/upload all useless), **or 38KB + Wi-Fi buffers coexisting very likely runs out of memory** | 🔴 Architecture-level deadlock |
+| **42KB+ resident** | 38KB I4 canvas (`buddy_ui.c:18,505`) + 6KB task stack + 4KB NimBLE host stack. Goes from "on-demand use" to "permanent use" | 🔴 |
+| **Resident CPU** | 5fps full-screen 38KB memset + per-pixel redraw (`buddy_ui.c:485,558`), competing with Home refresh for the lock and the single core | 🟠 |
+| **Zero benefit** | What moves over is just "credits that are always 0 + a BSOD sprite", with no new capability gained | 🔴 |
 
-**结论：不要内嵌。** 首页已经通过 `codex_app_get_usage()` 拿到了 codex 唯一真实可售的
-价值位（两张统计卡），再往下搬就是把「空的」搬上去，还要付出 Wi-Fi 常断的代价。
+**Conclusion: do not embed.** Home already gets, through `codex_app_get_usage()`, the only genuinely valuable slot of codex
+(the two stat cards); moving more over would just move "emptiness" up, and at the price of Wi-Fi being permanently down.
 
-### 2.3 建议（分两步）
+### 2.3 Recommendation (two steps)
 
-**第一步（立刻，1~2 小时）：修数据链，让首页那两张卡有意义**
+**Step 1 (immediately, 1~2 hours): fix the data chain so the two cards on Home mean something**
 
-在 `on_codex_ble_event()` 补 `RX_LINE` 分支，转调 `buddy_orchestrator_process_rx()`。
-然后**顺手修 `s_usage_ready`**：目前它一旦置位永不复位，会导致首页显示误导性的 `0`。
-建议改成「BLE 未连接时让 `codex_app_get_usage()` 返回 false」，首页自然回落 `--`。
+Add an `RX_LINE` branch to `on_codex_ble_event()` that forwards to `buddy_orchestrator_process_rx()`.
+Then **fix `s_usage_ready` while at it**: it is currently never reset once set, which makes Home show a misleading `0`.
+The suggestion is to make `codex_app_get_usage()` return false while BLE is not connected, so Home naturally falls back to `--`.
 
-这是**最小改动、最大收益**的一步。
+This is the step with **the smallest change and the biggest gain**.
 
-**第二步（产品决策，二选一）**
+**Step 2 (product decision, pick one)**
 
-- **A. 保留板块**：如果你想留那只像素精灵当桌搭玩具，就留着，但别内嵌
-- **B. 删掉板块**：保留 `codex_app_get_usage()` 作为数据源，删掉
-  `buddy_ble` / `state` / `ui` / `orchestrator` / `app_logic` / `screenshot`。
-  Launcher 从 6 卡变 5 卡
+- **A. Keep the section**: if you want to keep that pixel sprite as a desk-setup toy, keep it, but do not embed it
+- **B. Delete the section**: keep `codex_app_get_usage()` as a data source, and delete
+  `buddy_ble` / `state` / `ui` / `orchestrator` / `app_logic` / `screenshot`.
+  The Launcher goes from 6 cards to 5
 
-> ⚠️ **删之前必须确认**：`buddy_font_16.c`（31,044 行）是**首页的中文字库**，
-> 首页所有中文（姓名/签名/天气/提示）全靠它。删 codex 目录时**绝不能一起删**。
+> ⚠️ **Confirm before deleting**: `buddy_font_16.c` (31,044 lines) is **Home's Chinese font**,
+> and all Chinese on Home (name/signature/weather/hints) depends on it. When deleting the codex directory, it **must never be deleted along with it**.
 
-**顺带修**：`codex_app_stop()` 不释放 `buddy_sound` 任务（4096B 栈，无 deinit，
-stop 后永久常驻）+ `buddy_settings.c:318` NVS handle 从不 `nvs_close`
-→ **反复进出 codex 会泄漏**。
+**Fix along the way**: `codex_app_stop()` does not release the `buddy_sound` task (4096B stack, no deinit,
+resident permanently after stop) + the NVS handle at `buddy_settings.c:318` is never `nvs_close`d
+→ **entering and leaving codex repeatedly leaks**.
 
 ---
 
-## 三、行动优先级
+## 3. Action priorities
 
-| 优先级 | 动作 | 预估 |
+| Priority | Action | Estimate |
 | --- | --- | --- |
-| P0 | 补 `APP_EV_TICK`（voice 所有超时失效，按住不放会永远录） | 小 |
-| P0 | 补 `on_codex_ble_event` 的 `RX_LINE` 分发 + 修 `s_usage_ready` 语义 | 1~2h |
-| **P1** | **voice 通道 BLE → Wi-Fi UDP**（省 44.7KB、不再停 Wi-Fi、消除重启循环与幽灵按键） | 中 |
-| P1 | 修 codex 的 sound 任务 / NVS handle 泄漏 | 小 |
-| P2 | 录音界面接 `audio_streamer_peak()` 出波形 | 小 |
-| P2 | 删 BLE 栈 / USB 半成品 / 死代码（voice 4.4k → ~1.5k 行） | 中 |
-| P2 | codex 板块去留决策（删 or 留） | ✅ 已决策：**移除**，见第五节 |
-| — | 审批手刹去留（与「无线麦克风」无关，可砍） | 需决策 |
+| P0 | Add `APP_EV_TICK` (all voice timeouts are dead; holding the key records forever) | Small |
+| P0 | Add the `RX_LINE` dispatch in `on_codex_ble_event` + fix the `s_usage_ready` semantics | 1~2h |
+| **P1** | **voice channel BLE → Wi-Fi UDP** (saves 44.7KB, no longer stops Wi-Fi, removes the reboot loop and phantom key presses) | Medium |
+| P1 | Fix the codex sound task / NVS handle leaks | Small |
+| P2 | Hook `audio_streamer_peak()` into the recording screen for a waveform | Small |
+| P2 | Delete the BLE stack / half-finished USB / dead code (voice 4.4k → ~1.5k lines) | Medium |
+| P2 | Decide whether to keep or drop the codex section (delete or keep) | ✅ Decided: **remove**, see Section 5 |
+| — | Whether to keep the approval handbrake (unrelated to the "wireless microphone", can be cut) | Needs a decision |
 
 ---
 
-## 四、附：本次评估的方法与证据来源
+## 4. Appendix: method and evidence sources of this review
 
-- voice：通读 `main/apps/voice/` 全部 28 文件，重点 `app_state.c` /
+- voice: read all 28 files of `main/apps/voice/` in full, focusing on `app_state.c` /
   `audio_streamer.c` / `ble_audio.c` / `app_protocol.c` / `app_voice.cc`
-- codex：通读 `main/apps/codex/`，关键结论均经 Grep 复核
-  （`buddy_orchestrator_process_rx` 全仓零调用方已二次确认）
-- 外部方案（2026-09-12 联网核实）：
-  - **ESP32-C3 只有 USB-Serial-JTAG，无法自定义描述符，做不了 USB UAC 麦克风**
-    （乐鑫官方 FAQ + esp-iot-solution 外设矩阵；USB-OTG 仅 S2/S3/P4 有）
-    → 「设备被电脑直认成麦克风、零 companion」这条路在 C3 上硬件不通
-  - **ESP-SR 在 C3(无 PSRAM) 只支持 WakeNet9s 唤醒词，不支持 MultiNet 命令词**
-    → 本地 ASR 路线不成立
+- codex: read `main/apps/codex/` in full; all key conclusions were rechecked with Grep
+  (`buddy_orchestrator_process_rx` having zero callers repo-wide was confirmed twice)
+- External options (verified online on 2026-09-12):
+  - **The ESP32-C3 only has USB-Serial-JTAG, cannot customize descriptors, and cannot be a USB UAC microphone**
+    (Espressif official FAQ + esp-iot-solution peripheral matrix; USB-OTG exists only on S2/S3/P4)
+    → the path "the device is recognized directly by the computer as a microphone, zero companion" is hardware-blocked on the C3
+  - **On the C3 (no PSRAM), ESP-SR only supports the WakeNet9s wake word, not MultiNet command words**
+    → the local ASR route does not hold
 
 ---
 
-## 五、AI设备 黑屏定位与移除（2026-09-12 执行）
+## 5. AI Device black screen diagnosis and removal (executed 2026-09-12)
 
-用户报「打开 AI设备 后是黑屏页面」。定位后确认该模块在本项目里**从未在真机上跑通过**，
-且其价值需要一台 PC 端 Codex 桥，当前不需要 → 按用户授权**整体移除**。
+The user reported "after opening AI Device it is a black page". After diagnosis it was confirmed that this module **has never run successfully on a real device** in this project,
+and its value needs a PC-side Codex bridge, which is not needed now → **removed as a whole** with the user's authorization.
 
-### 5.1 排查过程与证据
+### 5.1 Investigation process and evidence
 
-| 步骤 | 手段 | 结果 |
+| Step | Method | Result |
 | --- | --- | --- |
-| 1 | Grep 全部历史日志找 codex 痕迹 | **零命中** —— 该模块从建仓起没被真机走过一次 |
-| 2 | 加诊断日志（canvas 分配 / 堆 / LVGL 锁）→ 编译烧录 → 串口 `'4'` 进应用 | `canvas 38468 bytes OK`、`ui_init done; screen loaded`，**无 panic、无重启** |
-| 3 | 加画布像素直方图（每 2s 统计 16 个调色板索引的像素数） | `nonzero=4595`（ink=608 / dim=1583 / line=428 / orange=111），`active=1` |
-| 4 | 读 LVGL 9 源码对账 | **根因**：见下 |
+| 1 | Grep all historical logs for codex traces | **Zero hits**: this module has never been run on a real device since the repo was created |
+| 2 | Added diagnostic logs (canvas allocation / heap / LVGL lock) → built and flashed → entered the app with serial `'4'` | `canvas 38468 bytes OK`, `ui_init done; screen loaded`, **no panic, no reboot** |
+| 3 | Added a canvas pixel histogram (every 2s counting pixels of the 16 palette indices) | `nonzero=4595` (ink=608 / dim=1583 / line=428 / orange=111), `active=1` |
+| 4 | Cross-checked against the LVGL 9 source | **Root cause**: see below |
 
-结论：**画布内容是对的、codex 屏幕也确实是当前活动屏，但物理屏只有底色 `0x080A0C`（近黑）**
-—— 所以用户看到的就是一页黑屏。
+Conclusion: **the canvas content is correct, and the codex screen really is the active screen, but the physical screen shows only the base color `0x080A0C` (near black)**,
+so what the user sees is a black page.
 
-### 5.2 根因
+### 5.2 Root cause
 
-`main/apps/codex/buddy_ui.c` 用 `lv_canvas` + `LV_COLOR_FORMAT_I4`（4bpp 索引色）当整屏
-帧缓冲（为了省 RAM：I4 只要 38KB，RGB565 要 150KB，而进入 codex 时只剩 ~124KB 空闲）。
+`main/apps/codex/buddy_ui.c` uses an `lv_canvas` + `LV_COLOR_FORMAT_I4` (4bpp indexed color) as the whole-screen
+frame buffer (to save RAM: I4 takes only 38KB while RGB565 takes 150KB, and only ~124KB is free when entering codex).
 
-但 **LVGL 9 的软件渲染器不支持把 I4 源图混到 RGB565 目标**：
+But **the LVGL 9 software renderer does not support blending an I4 source image onto an RGB565 target**:
 
-- `src/draw/sw/blend/lv_draw_sw_blend_to_rgb565.c:444-451` 的 image blend 分支里，
-  索引格式**只有 `case LV_COLOR_FORMAT_I1`**（受 `LV_DRAW_SW_SUPPORT_I1` 控制），
-  I2/I4/I8 全部落到 `default: LV_LOG_WARN("Not supported source color format")` → 一个像素都不画。
-- 其它目标格式（`lv_draw_sw_blend_to_rgb888/argb8888/l8/a8/al88`）同样只有 I1 分支。
-- 本项目 `sdkconfig` 里 `CONFIG_LV_DRAW_SW_SUPPORT_I1=y`，而 LVGL 的 Kconfig
-  **根本没有 I2/I4/I8 的开关** —— 也就是说这不是配置漏开，是 LVGL 这个版本的能力边界。
+- In the image blend branch at `src/draw/sw/blend/lv_draw_sw_blend_to_rgb565.c:444-451`, among the indexed formats
+  **only `case LV_COLOR_FORMAT_I1` exists** (controlled by `LV_DRAW_SW_SUPPORT_I1`);
+  I2/I4/I8 all fall to `default: LV_LOG_WARN("Not supported source color format")` → not a single pixel is drawn.
+- The other target formats (`lv_draw_sw_blend_to_rgb888/argb8888/l8/a8/al88`) likewise only have the I1 branch.
+- In this project's `sdkconfig`, `CONFIG_LV_DRAW_SW_SUPPORT_I1=y`, and LVGL's Kconfig
+  **has no switch for I2/I4/I8 at all**: so this is not a missed config option but the capability boundary of this LVGL version.
 
-顺带解释了为什么日志里一条警告都没有：`LV_LOG_LEVEL` 没开到 WARN。
+This also explains why there was not a single warning in the logs: `LV_LOG_LEVEL` was not turned up to WARN.
 
-### 5.3 为什么不"修"而是移除
+### 5.3 Why remove instead of "fix"
 
-修 I4 渲染没有便宜的解法：
+There is no cheap way to fix I4 rendering:
 
-- 换 RGB565 整屏 canvas → 需 150KB，**内存不够**（进 codex 时只剩 ~124KB）。
-- 绕开 LVGL、用行缓冲直接推 `esp_lcd_panel_draw_bitmap()` → 相当于把 codex 做成
-  LVGL 框架外的特例应用，要接管面板与过渡屏机制，是重构不是修复。
-- 即使修好显示，该应用**仍然不可用**：它的数据/命令链只接通了一半
-  （`buddy_orchestrator_process_rx` 至今零调用方，三键只播音效），
-  真正的功能依赖 PC 端 Codex 桥，而用户明确当前不需要。
+- Switching to a full-screen RGB565 canvas → needs 150KB, **not enough memory** (only ~124KB left when entering codex).
+- Bypassing LVGL and pushing line buffers directly with `esp_lcd_panel_draw_bitmap()` → amounts to turning codex into a special-case app
+  outside the LVGL framework, taking over the panel and the transition-screen mechanism, which is a refactor, not a fix.
+- Even if the display were fixed, the app **would still be unusable**: its data/command chain is only half connected
+  (`buddy_orchestrator_process_rx` still has zero callers, the three keys only play sounds),
+  and the real functionality depends on a PC-side Codex bridge, which the user explicitly does not need at present.
 
-代价对照：它占 38KB canvas + ~45KB NimBLE controller，并且**启动就 `suspend_wifi_driver()`**
-把 Wi-Fi 关掉（天气/时间/上传全断）。
+Cost comparison: it takes a 38KB canvas + ~45KB NimBLE controller, and **calls `suspend_wifi_driver()` at startup**,
+shutting Wi-Fi off (weather/time/upload all cut).
 
-### 5.4 实际执行
+### 5.4 What was actually done
 
-- **保命**：`buddy_font_16.c`（4360 字中文字库，首页+收音机共用）**迁移**到
-  `main/fonts/buddy_font_16.c`，声明统一进 `main/fonts/app_fonts.h`。
-- **备份**：整个 codex 目录（38 文件）备份到
-  `F:\WORK\AI硬件\_diag\removed-codex-backup-2026-09-12\codex\`（同时 git 历史里也有）。
-- **构建**：`main/CMakeLists.txt` 去掉 17 个 codex 源文件、`apps/codex` INCLUDE、
-  以及 codex 专用的 `-Wl,--wrap=ble_att_svr_register` 链接选项（wrapper 定义在 `buddy_ble.c`）。
-- **注册**：`app_registry.cc` 去掉 `g_codex_app` 与其 extern；**新增未知 app id 守卫**
-  （目标 app 不存在时直接拒绝切换 —— 否则会卡死在过渡屏，就是黑屏）。
-- **枚举**：`app_base.h` 删 `APP_ID_CODEX` 并重排（WIFI=4 / SETTINGS=5 / HOME=6）；
-  `main.cc` 串口键位 `'1'-'7'` → `'1'-'6'`。
-- **Launcher**：去掉「AI设备」卡名与图标两个 case。
-- **首页**：`codex_app_get_usage()` 调用摘掉，两张统计卡（今日/累计）恒显 `--`
-  （视觉与移除前一致 —— 之前没连过桥也是 `--`）；`update_codex_labels` 更名 `update_stat_labels`。
-- **删除**：`main/apps/codex/` 整个目录。
+- **Lifesaving**: `buddy_font_16.c` (the 4360-character Chinese font, shared by Home + Radio) was **moved** to
+  `main/fonts/buddy_font_16.c`, with the declaration unified into `main/fonts/app_fonts.h`.
+- **Backup**: the whole codex directory (38 files) was backed up to
+  `F:\WORK\AI硬件\_diag\removed-codex-backup-2026-09-12\codex\` (it is also in git history).
+- **Build**: `main/CMakeLists.txt` drops 17 codex source files, the `apps/codex` INCLUDE,
+  and the codex-specific `-Wl,--wrap=ble_att_svr_register` link option (the wrapper is defined in `buddy_ble.c`).
+- **Registration**: `app_registry.cc` drops `g_codex_app` and its extern; **an unknown-app-id guard was added**
+  (when the target app does not exist, the switch is refused outright; otherwise it would hang on the transition screen, which is the black screen).
+- **Enum**: `app_base.h` deletes `APP_ID_CODEX` and renumbers (WIFI=4 / SETTINGS=5 / HOME=6);
+  `main.cc` serial keys `'1'-'7'` → `'1'-'6'`.
+- **Launcher**: removed the two cases for the "AI Device" card name and icon.
+- **Home**: the `codex_app_get_usage()` call was taken off, and the two stat cards (today/total) always show `--`
+  (visually identical to before the removal, since it was also `--` when the bridge had never connected); `update_codex_labels` renamed to `update_stat_labels`.
+- **Deletion**: the entire `main/apps/codex/` directory.
 
-### 5.5 真机验证（`_diag/after_remove.log`）
+### 5.5 Real-device verification (`_diag/after_remove.log`)
 
-| 项 | 移除前 | 移除后 |
+| Item | Before removal | After removal |
 | --- | --- | --- |
-| Launcher 卡片 | 6 | **5** |
-| 开机落首页 | `Switching app: 0 -> 7` | `0 -> 6`（枚举重排） |
-| 开屏后空余堆 | 132 KB | **141 KB**（+.bss 回收 ≈ +9KB） |
-| 退出首页后空余堆 | 146 KB | **155 KB** |
-| 串口 `'4'` | → Codex（黑屏） | → 无线网络（正确） |
-| codex/BLE 日志 | 一屏 BLE_INIT/NimBLE | **零命中** |
-| panic / 重启 | 无 | 无 |
+| Launcher cards | 6 | **5** |
+| Boot landing on Home | `Switching app: 0 -> 7` | `0 -> 6` (enum renumbering) |
+| Free heap after screen-on | 132 KB | **141 KB** (+.bss reclaimed ≈ +9KB) |
+| Free heap after leaving Home | 146 KB | **155 KB** |
+| Serial `'4'` | → Codex (black screen) | → Wi-Fi (correct) |
+| codex/BLE logs | a screenful of BLE_INIT/NimBLE | **zero hits** |
+| panic / reboot | none | none |
 
-固件体积 3,161,360 → **3,108,096 字节（-52KB）**，app 分区剩余 26%。
+Firmware size 3,161,360 → **3,108,096 bytes (-52KB)**, app partition 26% free.
 
-### 5.6 顺带发现并修复：语音退出必崩（预存 bug，与 codex 无关）
+### 5.6 Found and fixed along the way: leaving voice always crashes (pre-existing bug, unrelated to codex)
 
-移除 codex 后跑全应用回归时发现：**进入「AI语音」再退出，100% panic 重启**
-（`Load access fault`）。历史日志里 `Switching app: 2 -> 3`、`Stopping app: 随身 AI 语音`
-从未出现 —— 这条路径以前从没被测过。
+While running the all-apps regression after removing codex, it was found that **entering "AI Voice" and then leaving it panics and reboots 100% of the time**
+(`Load access fault`). Neither `Switching app: 2 -> 3` nor `Stopping app: Portable AI Voice` ever appeared
+in the historical logs: this path had never been tested before.
 
-崩溃地址经 `riscv32-esp-elf-addr2line` 反查，调用链为：
+The crash address was reverse-looked-up with `riscv32-esp-elf-addr2line`, and the call chain is:
 
 ```
 app_registry_switch_to (app_registry.cc:141)
  → voice_app_stop (app_voice.cc:292)
   → app_ui_deinit (app_ui.c:412) → app_ui_hide (app_ui.c:407)
    → lv_screen_load → lv_obj_add_flag → lv_obj_invalidate
-    → lv_obj_tree_walk → lv_obj_get_display → lv_obj_get_parent   ← 崩在这
+    → lv_obj_tree_walk → lv_obj_get_display → lv_obj_get_parent   ← crashes here
 ```
 
-**根因**：`app_ui.c` 的 `app_ui_show()` 把 `lv_screen_active()`（此刻是 app_registry 的
-**过渡屏**）缓存进 `s_previous_screen`，而 `release_transition_screen()` 在切换完成后
-就把它删了 → 离开语音时 `app_ui_hide()` 用悬空指针 `lv_screen_load()` → 解引用已释放内存。
-而"恢复上一屏"本来就多余：`switch_to()` 在 `stop()` 之前已加载过渡屏，之后又会启动下一个
-App / 回 Launcher，屏幕归属由 registry 统一管。
+**Root cause**: `app_ui_show()` in `app_ui.c` caches `lv_screen_active()` (at that moment app_registry's
+**transition screen**) into `s_previous_screen`, and `release_transition_screen()` deletes it once the switch completes
+→ when leaving voice, `app_ui_hide()` calls `lv_screen_load()` with a dangling pointer → dereferencing freed memory.
+And "restore the previous screen" was redundant to begin with: `switch_to()` has already loaded the transition screen before `stop()`, and afterwards will start the next
+app / return to the Launcher, so screen ownership is managed uniformly by the registry.
 
-**修法**：`app_ui.c` 删掉 `s_previous_screen` 与其全部恢复逻辑，`app_ui_hide()` 只隐藏自己的
-chrome。全仓只有 voice 有这种写法。
+**Fix**: `app_ui.c` deletes `s_previous_screen` and all its restore logic, and `app_ui_hide()` only hides its own
+chrome. In the whole repo only voice has this pattern.
 
-**验证**：`_diag/voice_exit_test.log`（修前）→ 必 panic；`_diag/voice_fix_verify.log`（修后）
-→ 连进连出语音两次均 `Voice App cleanly stopped. Free heap: 105 KB`，零 panic、零重启、
-堆稳定；`_diag/full_sweep.log` → 五个应用顺序进出 + 长按 OK 回首页全通。
+**Verification**: `_diag/voice_exit_test.log` (before the fix) → always panics; `_diag/voice_fix_verify.log` (after the fix)
+→ entering and leaving voice twice in a row both show `Voice App cleanly stopped. Free heap: 105 KB`, zero panic, zero reboot,
+stable heap; `_diag/full_sweep.log` → all five apps enter and leave in sequence, and long-press OK returns to Home throughout.
 
-### 5.7 如果将来要恢复
+### 5.7 If it is ever restored
 
-1. 从 `_diag/removed-codex-backup-2026-09-12/codex/` 或 git 历史取回源码（注意把
-   `buddy_font_16.c` 留在 `main/fonts/`，不要再放回 codex 目录）。
-2. **先解决 I4 渲染**：把 `buddy_ui.c` 的 canvas 换成 LVGL 能混的格式，或改成
-   行缓冲直推面板。`buddy_i4.c` / `buddy_sprite.c` 是 I4 索引绘制层，可保留复用，只换最后一步输出。
-3. 再补齐 `buddy_orchestrator_process_rx()` 的接线，否则依然只是个会动的黑屏宠物。
+1. Retrieve the source from `_diag/removed-codex-backup-2026-09-12/codex/` or git history (note that
+   `buddy_font_16.c` must stay in `main/fonts/`; do not put it back in the codex directory).
+2. **First solve I4 rendering**: change the canvas of `buddy_ui.c` to a format LVGL can blend, or switch to
+   pushing line buffers directly to the panel. `buddy_i4.c` / `buddy_sprite.c` are the I4 indexed drawing layer, which can be kept and reused, changing only the final output step.
+3. Then complete the wiring of `buddy_orchestrator_process_rx()`, otherwise it is still just a moving black-screen pet.
 
-  - 小智 AI v2 能力矩阵（ESP-SR 唤醒 / Opus / 流式 ASR+LLM+TTS / 声纹 /
-    设备端 MCP / 云端 MCP 含 PC 桌面操作 / 支持 ESP32-C3）
-    —— 注：这适用于「语音助手」定位；本次用户澄清为「无线麦克风」定位后，
-    小智方案不再是 voice 的替代方向（已改写入 1.3~1.6）
+  - Xiaozhi AI v2 capability matrix (ESP-SR wake word / Opus / streaming ASR+LLM+TTS / voiceprint /
+    on-device MCP / cloud MCP including PC desktop operation / supports ESP32-C3)
+    — Note: this applies to the "voice assistant" positioning; after the user clarified the positioning as "wireless microphone",
+    the Xiaozhi scheme is no longer an alternative direction for voice (already rewritten into 1.3~1.6)
 
 ---
 
-## 六、AI语音 通道改造：BLE → Wi-Fi UDP（2026-09-12 执行）
+## 6. AI Voice channel rework: BLE → Wi-Fi UDP (executed 2026-09-12)
 
-方向由用户拍板：**通道重写为 Wi-Fi UDP**，且 **BLE 完全替换（不留回退）**。
-完整协议契约见 [`voice-udp-channel.md`](./voice-udp-channel.md)；此处只记「做了什么 + 实测 + 边界」。
+The direction was decided by the user: **rewrite the channel as Wi-Fi UDP**, and **replace BLE completely (no fallback kept)**.
+The full protocol contract is in [`voice-udp-channel.md`](./voice-udp-channel.md); here only "what was done + measurements + boundaries" are recorded.
 
-### 6.1 一句话
+### 6.1 In one sentence
 
-进语音不再杀 Wi-Fi；上行音频/事件从 NimBLE notify 换成 UDP 单播；NimBLE 整层退出链接。
+Entering voice no longer kills Wi-Fi; the uplink audio/events change from NimBLE notify to UDP unicast; the whole NimBLE layer drops out of the link.
 
-### 6.2 协议（设备端与 companion 共同遵守，改一侧必须同步另一侧）
+### 6.2 Protocol (both device side and companion must follow; a change on one side must be synchronized to the other)
 
-| type | 方向 | payload | 总长（含 1B type） |
+| type | Direction | payload | Total length (including 1B type) |
 | --- | --- | --- | --- |
-| `0x01` AUDIO | 设备→电脑 | `[seq][0x80]` + 804B IMA ADPCM block | 807B |
-| `0x02` EVENT | 双向 | UTF-8 JSON 行（**含结尾 `\n`**） | ≤ 513B |
-| `0x03` BEACON | 电脑→设备 | `{"v":1,"role":"pc","port":33333}`，每 1s 广播 | ~40B |
-| `0x04` PING | 设备→电脑 | 空，每 2s 一发，**只判活**（不派发到 relay） | 1B |
+| `0x01` AUDIO | device→computer | `[seq][0x80]` + 804B IMA ADPCM block | 807B |
+| `0x02` EVENT | both ways | UTF-8 JSON line (**including the trailing `\n`**) | ≤ 513B |
+| `0x03` BEACON | computer→device | `{"v":1,"role":"pc","port":33333}`, broadcast every 1s | ~40B |
+| `0x04` PING | device→computer | empty, one every 2s, **liveness only** (not dispatched to the relay) | 1B |
 
-- 端口 **33333**；companion = 服务端（bind + 广播 beacon），设备 = 客户端（bind + 从 beacon 学电脑 IP）。
-- `link_up` = 已学到对端 IP **且** 距最近一次收到对端报文 < 3000ms。
-- **AUDIO 保留 BLE 时代的 2B 分片帧头**（UDP 下退化为 `[seq][0x80]`）—— 让 companion 的
-  `reassemble_adpcm()` 一行都不用改；EVENT 同样带 `\n`，`reassemble_event()` 也零改动。
+- Port **33333**; companion = server (bind + broadcast beacon), device = client (bind + learn the computer IP from the beacon).
+- `link_up` = peer IP learned **and** < 3000ms since the last packet received from the peer.
+- **AUDIO keeps the BLE-era 2B fragment header** (it degenerates to `[seq][0x80]` over UDP), so the companion's
+  `reassemble_adpcm()` needs no changes at all; EVENT likewise carries `\n`, so `reassemble_event()` also needs zero changes.
 
-### 6.3 改了什么
+### 6.3 What changed
 
-**设备端（`passport-os`）**
+**Device side (`passport-os`)**
 
-| 文件 | 改动 |
+| File | Change |
 | --- | --- |
-| `main/apps/voice/udp_audio.c` / `.h` | **新增**（348 行）：socket + RX 任务 + beacon 学习 + PING 判活 |
-| `main/apps/voice/mode.c` | 重写为单通道转发（原 BLE/USB 双通道 → 只剩 UDP；USB 半成品分支删除） |
-| `main/apps/voice/app_voice.cc` | 删 `suspend_wifi_driver()` / `resume_wifi_driver()`；`ble_audio_*` → `udp_audio_*` |
-| `main/apps/voice/app_state.c` / `app_ui.c` | 显示名 "BLE" → "WiFi" |
-| `main/CMakeLists.txt` | `ble_audio.c` → `udp_audio.c`；REQUIRES 去掉 `bt` |
-| `main/apps/voice/ble_audio.c` / `.h` | **删除**（747 行；备份见 §6.7） |
+| `main/apps/voice/udp_audio.c` / `.h` | **New** (348 lines): socket + RX task + beacon learning + PING liveness |
+| `main/apps/voice/mode.c` | Rewritten as single-channel forwarding (original BLE/USB dual channel → only UDP remains; the half-finished USB branch deleted) |
+| `main/apps/voice/app_voice.cc` | Deleted `suspend_wifi_driver()` / `resume_wifi_driver()`; `ble_audio_*` → `udp_audio_*` |
+| `main/apps/voice/app_state.c` / `app_ui.c` | Display name "BLE" → "WiFi" |
+| `main/CMakeLists.txt` | `ble_audio.c` → `udp_audio.c`; `bt` removed from REQUIRES |
+| `main/apps/voice/ble_audio.c` / `.h` | **Deleted** (747 lines; backup see §6.7) |
 
-**companion（`folo-ai-passport-voice/companion/`）**
+**companion (`folo-ai-passport-voice/companion/`)**
 
-| 文件 | 改动 |
+| File | Change |
 | --- | --- |
-| `udp_transport.py` | **新增**：`UdpTransport`，实现既有 5 方法契约（scan/connect/write/notify/disconnect）+ beacon 循环 + 读线程 |
-| `relay.py` | `_build_transport()` 增加 `channel == "wifi"` 分支 |
-| `fre_state.py` | `VALID_CHANNELS` 加 `"wifi"`；删掉「WiFi 通道已移除」的旧报错文案 |
-| `tests/test_udp_transport.py` | **新增** 13 条单测（含与 `reassemble_adpcm` 的跨模块契约、真 socket 回环） |
+| `udp_transport.py` | **New**: `UdpTransport`, implementing the existing 5-method contract (scan/connect/write/notify/disconnect) + beacon loop + read thread |
+| `relay.py` | `_build_transport()` gains a `channel == "wifi"` branch |
+| `fre_state.py` | `VALID_CHANNELS` adds `"wifi"`; the old "WiFi channel has been removed" error text deleted |
+| `tests/test_udp_transport.py` | **New**: 13 unit tests (including a cross-module contract with `reassemble_adpcm` and a real-socket loopback) |
 
-`relay.py` 核心与 `adpcm.py` / `asr_client.py` / `inject.py` **一行未改** —— 5 方法契约吸收了一切差异。
+The `relay.py` core and `adpcm.py` / `asr_client.py` / `inject.py` have **not a single line changed**: the 5-method contract absorbed every difference.
 
-### 6.4 实测结果
+### 6.4 Measured results
 
-| 项 | 改造前 | 改造后 |
+| Item | Before | After |
 | --- | --- | --- |
-| 固件体积 | 3,108,096 B | **2,870,416 B（−232 KB）** |
-| app 分区剩余 | 26% | **32%** |
-| ELF 里的 NimBLE 符号 | 存在 | **零**（`nm` 查不到 `ble_audio*` / `nimble_port*` / `ble_gap_*` / `ble_gatts*`） |
-| 进语音时的 Wi-Fi | `StopStation()` + `esp_wifi_deinit()` | **完全不动** |
-| 传输层代码 | `ble_audio.c` 747 行 | `udp_audio.c` 348 行 |
+| Firmware size | 3,108,096 B | **2,870,416 B (−232 KB)** |
+| App partition free | 26% | **32%** |
+| NimBLE symbols in the ELF | present | **zero** (`nm` finds no `ble_audio*` / `nimble_port*` / `ble_gap_*` / `ble_gatts*`) |
+| Wi-Fi when entering voice | `StopStation()` + `esp_wifi_deinit()` | **left completely alone** |
+| Transport layer code | `ble_audio.c` 747 lines | `udp_audio.c` 348 lines |
 
-编译 `BUILD_EXIT=0`；真机 `_diag/udp_voice.log`：进/出语音干净 —— `UDP RX task started (port 33333)`
-→ `UDP 通道就绪` → `UDP 通道已关闭`，Wi-Fi 全程在（无 `esp_wifi_deinit`）、无 NimBLE 日志，
-退出后 `Free heap: 131 KB`，无 panic。companion 单测 `13 passed`（`_diag/pytest_udp.log`）。
+Build `BUILD_EXIT=0`; real-device `_diag/udp_voice.log`: entering/leaving voice is clean: `UDP RX task started (port 33333)`
+→ `UDP channel ready` → `UDP channel closed`, Wi-Fi stays up throughout (no `esp_wifi_deinit`), no NimBLE logs,
+and after exit `Free heap: 131 KB`, no panic. Companion unit tests `13 passed` (`_diag/pytest_udp.log`).
 
-### 6.5 验证边界（未跑通的部分，需知悉）
+### 6.5 Verification boundary (the part that was not run through; to be aware of)
 
-**设备→电脑的实时音频 e2e 未在本机跑通**，原因是网络拓扑而非代码：设备已连 `ZTE-2302-5G`、
-拿到 `sta ip: 192.168.5.4`，而本机唯一可路由地址是 `192.168.1.3`（以太网），Wi-Fi 网卡均为
-「已断开连接」；`Test-Connection 192.168.5.4` 返回 False。
+**Real-time device→computer audio e2e was not run through on this machine**, because of the network topology rather than the code: the device is connected to `ZTE-2302-5G`
+and got `sta ip: 192.168.5.4`, while this machine's only routable address is `192.168.1.3` (Ethernet), and the Wi-Fi adapters are all
+"disconnected"; `Test-Connection 192.168.5.4` returns False.
 
-→ 复现 e2e 只需：在一台**与设备同网段**的电脑上，把 companion 的 `channel` 设为 `wifi`
-（`udp_port` 留空即默认 33333）后跑 `relay.py`；首次运行需在防火墙弹窗放行入站 UDP 33333。
+→ To reproduce e2e, just: on a computer **on the same subnet as the device**, set the companion's `channel` to `wifi`
+(leave `udp_port` empty for the default 33333) and run `relay.py`; on first run, allow inbound UDP 33333 in the firewall prompt.
 
-### 6.6 遗留风险（沿用 `voice-udp-channel.md` §8）
+### 6.6 Remaining risks (carried over from `voice-udp-channel.md` §8)
 
-1. 需同子网；路由器若开 **AP 隔离（client isolation）** 则 beacon 到不了设备 → 永远 OFFLINE。
-2. **无加密无鉴权**（本次唯一安全回退）：同网段任意主机可伪造 beacon / 下行 JSON。
-3. 单设备假设（端口固定 33333，同网关两套设备会冲突）。
-4. Wi-Fi 常驻 + LVGL + 采集并存的堆余量已实测（退出后 131 KB），但**连续长时间录音**未压测。
+1. Needs the same subnet; if the router has **AP isolation (client isolation)** enabled, the beacon cannot reach the device → OFFLINE forever.
+2. **No encryption, no authentication** (the only security regression this time): any host on the same subnet can forge a beacon / downlink JSON.
+3. Single-device assumption (fixed port 33333; two sets of devices behind the same gateway would conflict).
+4. The heap headroom with Wi-Fi resident + LVGL + capture coexisting has been measured (131 KB after exit), but **continuous long-duration recording** has not been stress-tested.
 
-### 6.7 补充清理（本次复核发现）
+### 6.7 Supplementary cleanup (found during this recheck)
 
-设计文档 §7 计划移除 `ble_audio.c/.h`，但复核时发现这两个文件**仍在工作区**（git 显示 `M`，
-即被改过但未删）。确认它们**未进 `main/CMakeLists.txt` 的 SRCS、也无任何 `#include "ble_audio.h"`**
-（全仓仅剩注释提及）→ 属孤立死代码，已删除。
+The design document §7 planned to remove `ble_audio.c/.h`, but on recheck these two files were found **still in the workspace** (git shows `M`,
+i.e. modified but not deleted). It was confirmed that they are **not in SRCS of `main/CMakeLists.txt` and nothing has `#include "ble_audio.h"`**
+(only comments mention them in the whole repo) → orphaned dead code, now deleted.
 
-- 备份：`_diag/removed-ble-backup-2026-09-12/`（`ble_audio.c` 747 行 + `ble_audio.h` 128 行，完整）。
-- git 历史同样可恢复（`git show HEAD:main/apps/voice/ble_audio.c`）。
-- 删除后重新编译校验（`_diag/build_udp2.log`）→ **构建不受影响**（这两个文件本就没参与编译）。
+- Backup: `_diag/removed-ble-backup-2026-09-12/` (`ble_audio.c` 747 lines + `ble_audio.h` 128 lines, complete).
+- Also recoverable from git history (`git show HEAD:main/apps/voice/ble_audio.c`).
+- Rebuilt after deletion to verify (`_diag/build_udp2.log`) → **the build is unaffected** (these two files never took part in compilation).

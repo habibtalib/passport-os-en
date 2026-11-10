@@ -25,9 +25,9 @@ esp_err_t app_ui_init(void) {
     s_screen=lv_obj_create(NULL);ui_pixel_background(s_screen);
     lv_obj_t *top=ui_pixel_top_bar(s_screen);
     ui_pixel_wifi_bars_create(top, 12, 18, s_wifi_bars);
-    lv_obj_t *name=ui_pixel_label(top,"随身语音",&buddy_font_16,UI_TEXT);lv_obj_align(name,LV_ALIGN_LEFT_MID,42,0);
+    lv_obj_t *name=ui_pixel_label(top,"Pocket Voice",&buddy_font_16,UI_TEXT);lv_obj_align(name,LV_ALIGN_LEFT_MID,42,0);
     s_battery=ui_pixel_battery_create(top,206,6,UI_TEXT,&lv_font_montserrat_14);
-    text("AI语音输入",&ui_font_20,UI_TEXT,12,48,216,28);
+    text("AI Voice Input",&ui_font_20,UI_TEXT,12,48,216,28);
     s_mic=lv_obj_create(s_screen);lv_obj_remove_style_all(s_mic);lv_obj_remove_flag(s_mic,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(s_mic,88,100);lv_obj_set_size(s_mic,64,64);
     block(s_mic,22,0,20,32,UI_ACCENT);
@@ -36,20 +36,20 @@ esp_err_t app_ui_init(void) {
     block(s_mic,14,39,36,3,UI_TEXT_DIM);block(s_mic,30,42,4,12,UI_TEXT_DIM);block(s_mic,22,54,20,3,UI_TEXT_DIM);
     for(int i=0;i<7;i++)s_bars[i]=block(s_screen,61+i*18,153,10,2,UI_ACCENT);
     s_elapsed=text("00:00",&lv_font_montserrat_32,UI_TEXT,12,157,216,38);
-    s_state=text("等待电脑连接",&ui_font_20,UI_WARNING,12,188,216,28);
-    s_help=text("启动电脑端转发器",&buddy_font_16,UI_TEXT_DIM,12,220,216,22);
-    s_channel=text("电脑输入选择\nCABLE Output\n转发器输出选择\nCABLE Input",&buddy_font_16,UI_TEXT_DIM,12,137,216,112);
+    s_state=text("Waiting for PC",&ui_font_20,UI_WARNING,12,188,216,28);
+    s_help=text("Start PC relay",&buddy_font_16,UI_TEXT_DIM,12,220,216,22);
+    s_channel=text("PC input select\nCABLE Output\nRelay output select\nCABLE Input",&buddy_font_16,UI_TEXT_DIM,12,137,216,112);
     lv_label_set_long_mode(s_channel,LV_LABEL_LONG_WRAP);lv_obj_set_style_text_line_space(s_channel,6,0);
     block(s_screen, 12, 238, 216, 1, UI_BORDER);
     for(int i=0;i<2;i++){
-        s_keys[i*2]=text(i?"下键":"上键",&buddy_font_16,UI_TEXT_DIM,34,247+i*25,40,22);
+        s_keys[i*2]=text(i?"Down":"Up",&buddy_font_16,UI_TEXT_DIM,34,247+i*25,40,22);
         lv_obj_set_style_border_width(s_keys[i*2],1,0);lv_obj_set_style_border_color(s_keys[i*2],lv_color_hex(UI_BORDER),0);
         lv_obj_set_style_pad_top(s_keys[i*2],2,0);
-        s_keys[i*2+1]=text(i?"回车":"按住说话",&buddy_font_16,UI_TEXT,86,247+i*25,120,22);
+        s_keys[i*2+1]=text(i?"Enter":"Hold to talk",&buddy_font_16,UI_TEXT,86,247+i*25,120,22);
         lv_obj_set_style_text_align(s_keys[i*2+1],LV_TEXT_ALIGN_LEFT,0);
     }
-    s_notice=text("设置后会自动就绪",&buddy_font_16,UI_TEXT_DIM,12,263,216,22);
-    text("长按确定返回",&buddy_font_16,UI_TEXT_DIM,12,298,216,20);
+    s_notice=text("Ready after setup",&buddy_font_16,UI_TEXT_DIM,12,263,216,22);
+    text("Hold OK: back",&buddy_font_16,UI_TEXT_DIM,12,298,216,20);
     app_ui_snapshot_t snap={.state=APP_ST_READY,.screen_on=true};app_ui_render(&snap);return ESP_OK;
 }
 void app_ui_show(void){if(s_screen)lv_screen_load(s_screen);}
@@ -74,8 +74,8 @@ void app_ui_render(const app_ui_snapshot_t *snap){
     }
     char timer[20];unsigned sec=snap->elapsed_ms/1000;snprintf(timer,sizeof(timer),"%02u:%02u",sec/60,sec%60);ui_pixel_label_set_text(s_elapsed,timer);
     lv_obj_set_y(s_state,channel?100:recording?197:188);
-    const char *state=snap->init_failed?"语音启动失败":!snap->link_up?"等待电脑连接":channel?"麦克风未就绪":recording?"正在传音":snap->toast[0]?snap->toast:snap->net_busy?"网络不稳":"可以说话了";
+    const char *state=snap->init_failed?"Voice init failed":!snap->link_up?"Waiting for PC":channel?"Mic not ready":recording?"Sending audio":snap->toast[0]?snap->toast:snap->net_busy?"Network weak":"Ready to talk";
     ui_pixel_label_set_text(s_state,state);ui_pixel_text_color(s_state,channel?UI_DANGER:!ready||snap->net_busy?UI_WARNING:UI_TEXT);
-    ui_pixel_label_set_text(s_help,snap->init_failed?"长按确定返回后重试":!snap->link_up?(snap->elapsed_ms>=10000?"需与电脑在同一 Wi-Fi":"启动电脑端转发器"):recording?"松开上键结束":snap->net_busy?"靠近路由器后重试":"对着设备麦克风说话");
-    ui_pixel_label_set_text(s_keys[1],recording?"松开结束":"按住说话");
+    ui_pixel_label_set_text(s_help,snap->init_failed?"Hold OK to exit, retry":!snap->link_up?(snap->elapsed_ms>=10000?"PC must be on same Wi-Fi":"Start PC relay"):recording?"Release Up to end":snap->net_busy?"Move near router, retry":"Speak into the mic");
+    ui_pixel_label_set_text(s_keys[1],recording?"Release":"Hold to talk");
 }

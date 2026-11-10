@@ -1,42 +1,42 @@
-# Passport OS 社区安装说明
+# Passport OS Community Install Guide
 
-这是给普通用户的安装说明。使用预编译固件不需要安装 AI 工具；下载固件、烧录到匹配硬件，再完成首次配网即可。返回 [项目首页](../README.md) 可查看应用清单和 DIY 开发入口。
+This is the install guide for ordinary users. Using a prebuilt firmware does not require AI tools: download the firmware, flash it to matching hardware, then complete the first-time Wi-Fi setup. Go back to the [project home](../README.md) for the app list and the DIY development entry points.
 
-## 适用设备
+## Supported devices
 
 - FoloToy AI Passport
-- ESP32-C3、8 MB Flash
-- 与发布包中的 `partitions.csv`、屏幕、音频编解码器和按键电路匹配的硬件版本
+- ESP32-C3, 8 MB Flash
+- A hardware revision that matches the `partitions.csv`, screen, audio codec and button circuit in the release package
 
-外观相似但 Flash 容量、屏幕、引脚、音频芯片或电池电路不同的设备不能直接刷入。
+Devices that look similar but differ in Flash size, screen, pins, audio chip or battery circuit cannot be flashed directly.
 
-## 下载文件
+## Download the files
 
-从同一个 GitHub Release 下载：
+Download from the same GitHub Release:
 
-- `FoloToy-AI-Passport-vX.Y.Z-full.bin`：首次安装或彻底重置，写入地址 `0x0`。
-- `FoloToy-AI-Passport-vX.Y.Z-app.bin`：已有相同 Passport OS 分区表的普通升级，写入地址 `0x10000`。
-- `SHA256.txt`：验证下载文件没有损坏或被替换。
+- `FoloToy-AI-Passport-vX.Y.Z-full.bin`: first installation or a complete reset, written at address `0x0`.
+- `FoloToy-AI-Passport-vX.Y.Z-app.bin`: a normal upgrade on a device with the same Passport OS partition table, written at address `0x10000`.
+- `SHA256.txt`: verifies that the downloaded files are not corrupted or replaced.
 
-不要混用不同版本的完整镜像、应用镜像和分区表。完整镜像会覆盖设备配置；需要保留 Wi-Fi、头像、名片或游戏记录时，应使用应用镜像并先确认分区表一致。
+Do not mix full images, application images and partition tables from different versions. The full image overwrites device configuration; to keep Wi-Fi, portrait, card or game records, use the application image and confirm the partition table is identical first.
 
-## Windows 安装
+## Windows installation
 
-1. 安装 Python 3.11 或更新版本。
-2. 打开 PowerShell，安装 esptool：
+1. Install Python 3.11 or newer.
+2. Open PowerShell and install esptool:
 
 ```powershell
 py -m pip install esptool
 ```
 
-3. 用 USB 连接设备，在设备管理器确认串口号，例如 `COM3`。
-4. 可选：验证下载的完整镜像：
+3. Connect the device over USB and confirm the serial port in Device Manager, for example `COM3`.
+4. Optional: verify the downloaded full image:
 
 ```powershell
 Get-FileHash .\FoloToy-AI-Passport-vX.Y.Z-full.bin -Algorithm SHA256
 ```
 
-5. 首次安装或清空数据时执行：
+5. For a first install or to clear data, run:
 
 ```powershell
 py -m esptool --chip esp32c3 --port COM3 --baud 460800 erase-flash
@@ -45,49 +45,49 @@ py -m esptool --chip esp32c3 --port COM3 --baud 460800 write-flash `
   0x0 .\FoloToy-AI-Passport-vX.Y.Z-full.bin
 ```
 
-6. 普通升级只写应用区：
+6. For a normal upgrade, write only the application area:
 
 ```powershell
 py -m esptool --chip esp32c3 --port COM3 --baud 460800 write-flash `
   0x10000 .\FoloToy-AI-Passport-vX.Y.Z-app.bin
 ```
 
-烧录期间不要拔 USB。写入成功后设备会自动复位；如果串口暂时没有输出，重新插拔 USB 再观察设备屏幕。
+Do not unplug USB while flashing. After a successful write the device resets automatically; if the serial port shows no output for a while, replug USB and watch the device screen.
 
-## 首次启动
+## First boot
 
-首次启动会进入手机设置页面，并启动一个没有密码的热点，例如 `Passport-WiFi-D7A9`：
+On first boot the device shows the phone setup page and starts a hotspot with no password, for example `Passport-WiFi-D7A9`:
 
-1. 手机连接这个热点。
-2. 浏览器打开 `http://192.168.4.1`。
-3. 保存家庭 Wi-Fi、城市和个人资料。
-4. 按页面提示上传头像或名片；不需要的项目可以跳过。
-5. 保存后返回首页，设备会使用自己的 Wi-Fi 连接网络。
+1. Connect your phone to this hotspot.
+2. Open `http://192.168.4.1` in a browser.
+3. Save your home Wi-Fi, city and profile.
+4. Follow the page to upload a portrait or card; you can skip anything you do not need.
+5. After saving, return to Home; the device connects to the network using its own Wi-Fi.
 
-## 功能和外部服务
+## Features and external services
 
-- 首页天气和空气质量需要网络与城市坐标。
-- 收音机依赖公共网络电台地址，电台可因地区或服务变化而失效。
-- 小智需要网络和对应服务端配置。
-- 随身语音需要另行运行 Windows 电脑端桥接程序。
-- Muse 需要手机配对；使用代理时填写代理主机的局域网 IP 和 HTTP 端口，端口取决于代理工具。
-- 狗游戏、俄罗斯方块、声音跳一跳、秒表和番茄钟可离线使用。
+- Weather and air quality on Home need a network and city coordinates.
+- Radio depends on public online station addresses; stations can stop working because of region or service changes.
+- Xiaozhi needs a network and the matching server-side configuration.
+- AI Voice needs the Windows computer-side bridge program to be run separately.
+- Muse needs phone pairing; when using a proxy, enter the proxy host's LAN IP and HTTP port, which depends on the proxy tool.
+- Bark Battle, Tetris, Sound Jump, Stopwatch and Pomodoro work offline.
 
-## 从源码构建
+## Build from source
 
-源码开发者需要 ESP-IDF 5.5.3、Python 3、Git，以及 Linux、WSL 或其他能够运行 ESP-IDF 的环境：
+Source developers need ESP-IDF 5.5.3, Python 3, Git, and Linux, WSL or another environment that can run ESP-IDF:
 
 ```bash
-git clone https://github.com/manchunx7-bit/passport-os.git
+git clone https://github.com/habibtalib/passport-os.git
 cd passport-os
 bash build.sh release
 ```
 
-`bash build.sh release` 默认从 `/opt/esp-idf` 加载环境；如果 ESP-IDF 安装在其他目录，使用 `IDF_DIR=/实际路径/esp-idf bash build.sh release` 指定。
+`bash build.sh release` loads the environment from `/opt/esp-idf` by default; if ESP-IDF is installed elsewhere, set it with `IDF_DIR=/actual/path/esp-idf bash build.sh release`.
 
-此命令的完整镜像输出到 `build-public/FoloToy-AI-Passport-full.bin`，应用镜像输出到 `build-public/passport-os.bin`。构建前会根据 `dependencies.lock` 获取 ESP-IDF 组件；不要把本机 `managed_components/` 或生成的 `sdkconfig` 提交到仓库。
+This command writes the full image to `build-public/FoloToy-AI-Passport-full.bin` and the application image to `build-public/passport-os.bin`. Before building, ESP-IDF components are fetched according to `dependencies.lock`; do not commit the local `managed_components/` or the generated `sdkconfig` to the repository.
 
-在已激活 ESP-IDF 5.5.3 的环境中执行验证：
+Run verification in an environment with ESP-IDF 5.5.3 activated:
 
 ```bash
 bash tools/test-host.sh
@@ -95,18 +95,18 @@ bash tools/test-host.sh
 ./tools/validate.sh --firmware
 ```
 
-## 常见问题
+## FAQ
 
-**连接不上热点**：确认设备已经启动到手机设置页；必要时重新插拔 USB。热点是开放网络，不需要密码。
+**Cannot connect to the hotspot**: confirm the device has booted to the phone setup page; replug USB if needed. The hotspot is an open network and needs no password.
 
-**烧录后仍出现旧资料**：说明只写了应用区，或擦除范围不完整。首次体验整机流程时使用完整镜像并先执行 `erase-flash`。
+**Old data still appears after flashing**: only the application area was written, or the erase range was incomplete. To experience the full device flow, use the full image and run `erase-flash` first.
 
-**小智或 Muse 无法连接**：先确认家庭 Wi-Fi 正常，再检查服务账号、手机配对状态和代理主机/端口。
+**Xiaozhi or Muse cannot connect**: first confirm home Wi-Fi works, then check the service account, the phone pairing state and the proxy host/port.
 
-**想保留自己的改版**：从源码修改对应应用，运行主机测试和固件验证，再生成自己的应用镜像或完整镜像。
+**Want to keep your own modified version**: change the corresponding app in the source, run the host tests and firmware validation, then build your own application image or full image.
 
-## 许可证和贡献
+## License and contributing
 
-Passport OS 主体使用 MIT。Muse 的 Noise 协议代码和适配层包含 Apache-2.0 上游内容，具体以组件目录中的 `LICENSE`、`NOTICE.md` 和第三方说明为准。提交代码前请不要加入 Wi-Fi 密码、API Token、设备日志、个人头像或本地配置导出。
+Passport OS itself is MIT. The Muse Noise protocol code and adaptation layer include Apache-2.0 upstream content; follow the `LICENSE`, `NOTICE.md` and third-party notes in the component directories. Before submitting code, do not include Wi-Fi passwords, API tokens, device logs, personal portraits or local configuration exports.
 
-欢迎提交问题、硬件兼容性反馈和功能改进；请在 Issue 中注明固件版本、硬件版本、烧录方式和是否保留了设备数据。
+Issues, hardware compatibility reports and feature improvements are welcome; please state the firmware version, hardware revision, flashing method and whether device data was kept.

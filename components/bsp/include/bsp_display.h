@@ -1,5 +1,5 @@
 // components/bsp/include/bsp_display.h
-// ST7789P3 240x320 显示:SPI 面板初始化 + 厂商专属寄存器 + LEDC 背光调光。
+// ST7789P3 240x320 display: SPI panel init + vendor-specific registers + LEDC backlight dimming.
 #pragma once
 
 #include "esp_err.h"
@@ -11,46 +11,46 @@
 extern "C" {
 #endif
 
-// 初始化 SPI 总线、面板、厂商寄存器、背光 LEDC。成功后屏幕已上电但内容未定。
+// Initialize the SPI bus, panel, vendor registers and backlight LEDC. On success the screen is powered but its content is undefined.
 esp_err_t bsp_display_init(void);
 
-// 取底层面板句柄。想直接 esp_lcd_panel_draw_bitmap 画,或接 LVGL 以外的 GUI 时用。
-// 未初始化返回 NULL。
+// Get the underlying panel handle. Use it to call esp_lcd_panel_draw_bitmap directly, or to attach a GUI other than LVGL.
+// Returns NULL if not initialized.
 esp_lcd_panel_handle_t bsp_display_panel(void);
 
-// 取底层 panel io 句柄(LVGL 接入需要)。未初始化返回 NULL。
+// Get the underlying panel io handle (needed for LVGL integration). Returns NULL if not initialized.
 esp_lcd_panel_io_handle_t bsp_display_io(void);
 
-// 不经 LVGL,同步把整屏 GRAM 铺成一个纯色(LVGL RGB565 表示,如 0x03120B)。
-// 用于"必须保证整屏已是确定颜色"的场合 —— 典型:点亮背光前先把底铺好,
-// 否则 LVGL 单缓冲分块异步刷新没推到的区域会露出未初始化的白屏。
-// 阻塞到写完。需要约 7.5KB 内部 DMA 内存,失败返回 ESP_ERR_NO_MEM。
+// Without LVGL, synchronously fill the whole GRAM with one solid color (LVGL RGB565 representation, e.g. 0x03120B).
+// For cases that "must guarantee the whole screen is already a definite color" - typically: lay the base before lighting the backlight,
+// otherwise the areas LVGL single-buffer chunked async refresh has not pushed will show the uninitialized white screen.
+// Blocks until written. Needs about 7.5KB of internal DMA memory; returns ESP_ERR_NO_MEM on failure.
 esp_err_t bsp_display_fill(uint16_t color);
 
-// 背光亮度 0..100(%)。LEDC PWM,0=全灭。
+// Backlight brightness 0..100 (%). LEDC PWM, 0 = fully off.
 void bsp_display_backlight(uint8_t percent);
 
-// 整机亮度上限 0..100(%)。App 仍可熄屏或临时调暗，但不能越过用户设置。
+// Device-wide brightness cap 0..100 (%). Apps may still turn the screen off or dim it temporarily, but cannot exceed the user setting.
 void bsp_display_set_master_brightness(uint8_t percent);
 uint8_t bsp_display_get_master_brightness(void);
 
-// 面板电源:off → ST7789 SLPIN(0x10) 睡眠——内部振荡器停,功耗降至 μA 级;
-// on → SLPOUT(0x11) + 120ms 等待 + DISPON(0x29)。DRAM 内容保留,唤醒即显示,
-// 无需重绘。未初始化时 no-op。
+// Panel power: off -> ST7789 SLPIN (0x10) sleep - the internal oscillator stops, power drops to the uA level;
+// on -> SLPOUT (0x11) + 120ms wait + DISPON (0x29). DRAM content is retained, so waking shows it immediately,
+// no redraw needed. No-op when uninitialized.
 void bsp_display_power(bool on);
 
 // ---------------------------------------------------------------------------
-// LVGL 接入(可选层)。必须先 bsp_display_init() 成功后再调。
-// 不想用 LVGL 的开发者可忽略本段,直接用 bsp_display_panel() 自己画。
+// LVGL integration (optional layer). Call only after bsp_display_init() has succeeded.
+// Developers who do not want LVGL can ignore this section and draw directly with bsp_display_panel().
 // ---------------------------------------------------------------------------
-// 前向声明:LVGL 里 lv_display_t 是 `typedef struct _lv_display_t lv_display_t;`,
-// 故此处用 struct 形式即可,避免本头文件强行 include lvgl.h。
+// Forward declaration: in LVGL lv_display_t is `typedef struct _lv_display_t lv_display_t;`,
+// so the struct form is enough here, avoiding forcing this header to include lvgl.h.
 struct _lv_display_t;
 
-// 启动 LVGL 与其渲染任务,返回 lv_display_t*。失败返回 NULL。
+// Start LVGL and its render task, returns lv_display_t*. Returns NULL on failure.
 struct _lv_display_t *bsp_lvgl_init(void);
 
-// LVGL 非线程安全:在【非 LVGL 任务】里操作任何 lv_* 对象前后必须加解锁。
+// LVGL is not thread-safe: before and after touching any lv_* object from a [non-LVGL task], lock and unlock are required.
 bool bsp_lvgl_lock(int timeout_ms);
 void bsp_lvgl_unlock(void);
 

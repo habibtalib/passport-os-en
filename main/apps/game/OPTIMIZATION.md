@@ -1,244 +1,244 @@
-# 《你在狗叫什么》优化报告
+# "Bark Battle" Optimization Report
 
-日期：2026-09-13 · 范围：`main/apps/game/`（`app_game.cc` / `game_core.{h,c}` / `game_mic.{h,c}` / 新增 `game_sfx.{h,c}`）
+Date: 2026-09-13 · Scope: `main/apps/game/` (`app_game.cc` / `game_core.{h,c}` / `game_mic.{h,c}` / new `game_sfx.{h,c}`)
 
-**前提约束：玩法核心（声控爬升/缓降 + 管道穿越）、美术风格（像素柴犬 + 草地柱）、幽默基调（段位评级文案）一律不改。所有难度/判定数值保持原值。**
+**Constraint: the core gameplay (voice-controlled climb/sink + passing through pipes), the art style (pixel Shiba + grass pillars) and the humorous tone (rating-tier copy) are not changed. All difficulty/hit-test values keep their original values.**
 
-涉及文件：
+Files involved:
 
-| 文件 | 性质 |
+| File | Nature |
 |---|---|
-| `app_game.cc` | 重写（UI 构建 / HUD / 演出 / 主循环四段化） |
-| `game_core.h` | 新增"难度曲线调参区"与判定常量，数值不变 |
-| `game_core.c` | 去冗余、常量外提、死因结构清零，行为不变 |
-| `game_mic.h/.c` | 修重入致命 bug + 响应优化 |
-| `game_sfx.h/.c` | **新增** 音效模块 |
-| `../CMakeLists.txt` | 追加 `apps/game/game_sfx.c` |
+| `app_game.cc` | Rewritten (UI build / HUD / presentation / main loop in four sections) |
+| `game_core.h` | Adds the "difficulty curve tuning area" and hit-test constants, values unchanged |
+| `game_core.c` | Redundancy removed, constants hoisted, death struct cleared; behavior unchanged |
+| `game_mic.h/.c` | Fixes a fatal re-entry bug + responsiveness optimization |
+| `game_sfx.h/.c` | **New** sound-effects module |
+| `../CMakeLists.txt` | Adds `apps/game/game_sfx.c` |
 
 ---
 
-## 一、性能
+## 1. Performance
 
-### P1 ★ 干掉每帧 `lv_label_set_text`（本次最大收益）
+### P1 (biggest win) Remove the per-frame `lv_label_set_text`
 
-**问题**：`tick()` 的 PLAYING 分支每帧无条件调用
+**Problem**: the PLAYING branch of `tick()` called this unconditionally every frame
 
 ```c
-lv_label_set_text(s_bark_lbl, thrust > 180 ? "汪汪!" : "汪!");   // 或 ""
+lv_label_set_text(s_bark_lbl, thrust > 180 ? "Woof!!" : "Woof!");   // or ""
 ```
 
-翻 LVGL 9 源码（`managed_components/lvgl__lvgl/src/widgets/label/lv_label.c:981`）确认，
-`lv_label_set_text → set_text_internal` **没有"和当前文本相同就短路"的逻辑**，每次都走：
+Reading the LVGL 9 source (`managed_components/lvgl__lvgl/src/widgets/label/lv_label.c:981`) confirms that
+`lv_label_set_text -> set_text_internal` has **no "short-circuit if the text equals the current one" logic**; every call does:
 
 ```c
-lv_free(label->text);            // 释放旧串
-label->text = lv_malloc(len);    // 分配新串
-copy_text_to_label(...);         // 拷贝
-lv_label_mark_need_refr_text();  // 失效 + 全文重新排版
+lv_free(label->text);            // free the old string
+label->text = lv_malloc(len);    // allocate the new string
+copy_text_to_label(...);         // copy
+lv_label_mark_need_refr_text();  // invalidate + re-layout the whole text
 ```
 
-也就是说 **30 次/秒的 malloc/free + 30 次/秒的全文重排**，即使文本一个字没变。
-这是堆碎片（小块反复分配释放）和掉帧（重排 + 额外 invalidate）的头号来源，
-在只有 ~100KB 堆的 C3 上尤其明显。
+That is **30 malloc/free per second + 30 full-text re-layouts per second**, even when not one character changed.
+This is the top source of heap fragmentation (small blocks repeatedly allocated and freed) and dropped frames (re-layout + extra invalidate),
+especially noticeable on the C3 with only ~100KB of heap.
 
-**改动**：新增 `TextCache` + `set_text_cached()`，调用前先 `strcmp`，不变就一次都不碰 LVGL。
-气泡、提示语全部走这条路径。
+**Change**: added `TextCache` + `set_text_cached()`, which does a `strcmp` first and does not touch LVGL at all if unchanged.
+The bubble and the hint text all go through this path.
 
-**预期效果**：游戏进行中**零**标签文本分配；静止/匀速飞行时气泡完全不产生 invalidate。
-堆碎片显著减少，`stop()` 后堆更容易回到进入前水平。
+**Expected effect**: **zero** label text allocations during play; with steady/constant-speed flight the bubble produces no invalidate at all.
+Heap fragmentation drops markedly, and after `stop()` the heap more easily returns to its pre-entry level.
 
-**回退**：把 `set_text_cached()` 换回 `lv_label_set_text()` 即可，无副作用。
+**Rollback**: swap `set_text_cached()` back to `lv_label_set_text()`; no side effects.
 
 ---
 
-### P2 全面"脏检查"：值没变就不写 LVGL
+### P2 Comprehensive "dirty checks": do not write LVGL if the value is unchanged
 
-`lv_obj_set_x/y` 内部有相同值短路（`lv_obj_pos.c:70/84`），但 **`set_size` / `set_style_*` / `set_text` 没有**。统一加一层缓存：
+`lv_obj_set_x/y` short-circuit on equal values internally (`lv_obj_pos.c:70/84`), but **`set_size` / `set_style_*` / `set_text` do not**. A uniform cache layer was added:
 
-| 项目 | 优化前 | 优化后 |
+| Item | Before | After |
 |---|---|---|
-| 耳朵 `s_dog_ear` y | 每帧 `set_y`（30/s） | 只在"上升↔下落"翻转那一帧写 |
-| 狗嘴高度 / 舌头位置 | 已缓存（保留） | 同上，阈值化 |
-| 离屏管道 | 每帧对 4 个子对象 `set_pos`（最多 120 次/s） | 加 `s_pipe_shown[]` 缓存，离屏期间一次都不写 |
-| 气泡标签位置 | 每帧 `set_y`，哪怕文本为空 | 仅文本非空时跟随 |
-| 纯色块 `bg_opa` | 依赖默认值 | `px_block()` 显式 `LV_OPA_COVER`，省掉每次绘制的 alpha 混合 |
+| Ear `s_dog_ear` y | `set_y` every frame (30/s) | Written only on the frame where "rising <-> falling" flips |
+| Dog mouth height / tongue position | Already cached (kept) | Same, thresholded |
+| Off-screen pipes | `set_pos` on 4 children every frame (up to 120/s) | `s_pipe_shown[]` cache added; not written at all while off-screen |
+| Bubble label position | `set_y` every frame, even if the text is empty | Follows only when the text is non-empty |
+| Solid-color block `bg_opa` | Relied on the default | `px_block()` sets `LV_OPA_COVER` explicitly, saving the alpha blend on every draw |
 
-**预期效果**：稳态飞行（无叫声变化、无管道进出屏）每帧只剩"狗 + 3 根在屏管道"的必要重绘。
-
----
-
-### P3 修 `s_frame` 只在 READY 自增导致的金丝雀每帧执行
-
-`s_frame++` 原本写在 `case GC_READY` 分支里，而游戏**进场即起飞、READY 永不进入** →
-`s_frame` 恒为 0 → `(s_frame & 31) == 0` 恒真 → 那条 `disp->inv_p` 金丝雀检测**每帧都在跑**（设计意图是每 32 帧一次）。
-
-**改动**：`s_frame++` 提到 `tick()` 顶部，每帧自增。
-
-**预期效果**：金丝雀开销降到 1/32；同时呼吸动画索引（`kBob[s_frame>>1]`）在 READY 态也恢复正确。
+**Expected effect**: in steady flight (no bark changes, no pipes entering/leaving the screen) each frame redraws only what is necessary for "dog + 3 on-screen pipes".
 
 ---
 
-### P4 采音侧
+### P3 Fix the canary running every frame because `s_frame` only incremented in READY
 
-- **调试日志可关**：原来每 ~2s 会在 256 采样上再扫一遍求 `mean_s`，并打一条 UART 日志。
-  新增 `#define GAME_MIC_DEBUG_LOG 0` 默认关闭（需要校准阈值时改 1）。
-- **首块直接播种 EMA**：原来 `ema` 从 0 爬到实际电平要 3~4 个块（≈64ms），
-  现在第一个有效块 `ema = mean`。出声响应快约 **64ms**，手感更跟手。
-- 热机期仍然丢弃 10 块（≈160ms）—— 这条是防"codec 上电满量程把狗顶上天"的，**不能省**。
+`s_frame++` was originally written in the `case GC_READY` branch, but the game **takes off on entry and READY is never entered** ->
+`s_frame` was constantly 0 -> `(s_frame & 31) == 0` was always true -> the `disp->inv_p` canary check **ran every frame** (the design intent was once every 32 frames).
 
----
+**Change**: `s_frame++` moved to the top of `tick()`, incrementing every frame.
 
-### P5 对象池 / 内存
-
-管道对象池（`GC_PIPES × 4` 个常驻 `lv_obj`）**保持原样** —— 它本来就是对的，
-游戏中的分配问题不在对象池，而在 P1 的标签文本。
-`stop()` 仍然无条件删屏（保留 2026-09-13 的 B2 修复），并在 `game_stop()` 里回收音效任务。
+**Expected effect**: canary overhead drops to 1/32; the breathing animation index (`kBob[s_frame>>1]`) is also correct again in the READY state.
 
 ---
 
-## 二、代码结构
+### P4 Mic side
 
-| # | 改动 | 目的 |
+- **Debug log can be turned off**: it used to scan the 256 samples again every ~2s to compute `mean_s` and print a UART log line.
+  Added `#define GAME_MIC_DEBUG_LOG 0`, off by default (set to 1 when calibrating thresholds).
+- **Seed the EMA from the first block**: `ema` used to climb from 0 to the actual level over 3-4 blocks (~64ms);
+  now the first valid block sets `ema = mean`. Sound response is faster by about **64ms**, so it feels more responsive.
+- Warm-up still discards 10 blocks (~160ms) -- this guards against "the codec's full-scale power-on garbage shooting the dog skyward" and **must not be skipped**.
+
+---
+
+### P5 Object pool / memory
+
+The pipe object pool (`GC_PIPES x 4` resident `lv_obj`s) is **kept as is** -- it was right all along;
+the allocation problem during play was not the object pool but the label text in P1.
+`stop()` still deletes the screen unconditionally (keeping the 2026-09-13 B2 fix) and reclaims the sfx task in `game_stop()`.
+
+---
+
+## 2. Code structure
+
+| # | Change | Purpose |
 |---|---|---|
-| S1 | `block()`/`mk_label()` → `px_block()`/`px_label()` | 与整机 `ui_pixel` 命名一致；`block` 是过于通用的名字 |
-| S2 | `build_ui()` 拆出 `build_dog/build_pipes/build_vu/build_dead_panel` | 构建职责单一，新增构件不用再往一个 60 行函数里塞 |
-| S3 | `tick()` 拆成 `ready_tick()/playing_tick()/dead_tick()` | 主循环从 90 行 switch 变成三句话的调度 |
-| S4 | 难度/判定常量集中到 `game_core.h` 的"调参区" | 原来散落在 `.c` 各处带长注释，改难度要在文件里翻 |
-| S5 | 删除 `gc_reset()` 里对 `s.pipes[i].x` 的重复赋值（先 0 再覆盖） | 去冗余 |
-| S6 | 音效独立成 `game_sfx.{h,c}` | 不污染 `app_game.cc`；不复用 voice 的 `app_sound`（会重复 open/close codec，见文件头注释） |
-| S7 | 每处关键改动都带"为什么"注释 | 该模块历史上踩过 EMA 无符号下溢、管道 `<<4` 多移、inv_p 死循环等坑，注释即防回归 |
+| S1 | `block()`/`mk_label()` -> `px_block()`/`px_label()` | Consistent with the device-wide `ui_pixel` naming; `block` was too generic a name |
+| S2 | `build_ui()` split into `build_dog/build_pipes/build_vu/build_dead_panel` | Single-responsibility building; new widgets no longer need to be stuffed into one 60-line function |
+| S3 | `tick()` split into `ready_tick()/playing_tick()/dead_tick()` | The main loop goes from a 90-line switch to a three-line dispatch |
+| S4 | Difficulty/hit-test constants gathered into the "tuning area" of `game_core.h` | They used to be scattered through the `.c` with long comments, so changing difficulty meant digging through the file |
+| S5 | Removed the duplicate assignment to `s.pipes[i].x` in `gc_reset()` (set to 0, then overwritten) | Redundancy removed |
+| S6 | Sound effects split into `game_sfx.{h,c}` | Does not pollute `app_game.cc`; does not reuse the voice `app_sound` (it would open/close the codec again, see the file header comment) |
+| S7 | Every key change carries a "why" comment | This module has historically hit the unsigned EMA underflow, the pipe `<<4` over-shift, the inv_p dead loop and similar pitfalls; the comments guard against regressions |
 
 ---
 
-## 三、玩法手感
+## 3. Gameplay feel
 
-### F1 ★ 修"退出后立刻重进 → 整局没有麦克风"（致命）
+### F1 (fatal) Fix "exit then immediately re-enter -> no microphone all round"
 
-`game_mic_start()` 原来开头是 `if (s_task) return;`。
-退出 App 后马上重进时，上一轮的采音任务往往还卡在 `bsp_audio_read()` 里（最长 16ms）没退出，
-`s_task` 非空 → **直接 return，一个任务都不建** → 这一局完全无声控，玩家只能看着狗匀速下坠。
+`game_mic_start()` used to begin with `if (s_task) return;`.
+When re-entering right after exiting the app, the previous round's mic task was often still stuck in `bsp_audio_read()` (up to 16ms) and had not exited,
+so `s_task` was non-null -> **immediate return, no task created at all** -> the round had no voice control and the player could only watch the dog sink at a constant speed.
 
-**改动**：`game_mic_start()` 发现 `s_task` 非空时，先 `s_active=false` 请求退出并等它真正退出（最多 600ms），再建新任务。
-同时 `game_mic_start()` 里清零 `s_level` / `s_ready`，避免上一局残留的响度带进新一局。
+**Change**: when `game_mic_start()` finds `s_task` non-null, it first sets `s_active=false` to request exit and waits for it to really exit (up to 600ms), then creates the new task.
+`game_mic_start()` also zeroes `s_level` / `s_ready`, so loudness left over from the previous round does not carry into the new one.
 
-**预期效果**：快速反复进出游戏也不会丢麦克风。
+**Expected effect**: rapidly entering and leaving the game repeatedly no longer loses the microphone.
 
-### F2 进场先起麦
+### F2 Start the mic on entry
 
-`game_start()` 里把 `game_mic_start()` 提到 `build_ui()` 之前，让 codec 上电热机（≈160ms）
-与建屏（约 40 个 `lv_obj`）的时间重叠。原来建完屏才开始热机，进场头 5 帧（≈165ms）电平恒为 0，
-狗会先白沉一截。
+In `game_start()`, `game_mic_start()` was moved before `build_ui()`, so the codec power-on warm-up (~160ms)
+overlaps with building the screen (about 40 `lv_obj`s). Previously warm-up only began after the screen was built, so for the first 5 frames (~165ms) the level was constantly 0
+and the dog would sink a bit for nothing.
 
-### F3 死亡演出：坠落 + 结算面板滑入
+### F3 Death presentation: fall + game-over panel slides in
 
-原来撞上瞬间结算面板直接出现在 y=86，没有过渡；而且死后按 OK 立刻重开，
-连按两下就会把结算一闪而过 —— 玩家根本不知道自己几分。
+Previously the game-over panel appeared directly at y=86 the instant of the crash, with no transition; and pressing OK after death restarted immediately,
+so pressing twice made the result flash by -- the player never knew their score.
 
-**改动**：
-1. 死亡后狗继续下坠 9 帧（≈300ms，7px/帧）落到地面，期间张嘴"呜!!"、耳朵耷拉；
-2. 坠完后结算面板从屏外 340 滑到 86（7 帧，≈230ms）；
-3. 坠落期间按 OK = **快进到结算**（不是重开）；结算出现后再按 OK = 重开。
+**Change**:
+1. After death the dog keeps falling for 9 frames (~300ms, 7px/frame) to the ground, mouth open going "aww!!" with drooping ears;
+2. After the fall the game-over panel slides from off-screen 340 to 86 (7 frames, ~230ms);
+3. Pressing OK during the fall = **fast-forward to the result** (not restart); pressing OK after the result appears = restart.
 
-**预期效果**：胜负节奏有明确的"结束 → 结果 → 再来"三段，成就感更强，也杜绝误触重开。
+**Expected effect**: the win/lose rhythm has a clear three-beat "end -> result -> again", a stronger sense of achievement, and accidental restarts are eliminated.
 
-### F4 新增 `game_mic_ready()`
+### F4 New `game_mic_ready()`
 
-区分"环境安静"与"麦克风还没热机"，供后续做"准备中"提示（当前仅用于可观测性）。
+Distinguishes "quiet environment" from "mic not warmed up yet", for a later "getting ready" hint (currently used only for observability).
 
 ---
 
-## 四、界面与反馈
+## 4. UI and feedback
 
-| # | 改动 | 目的 / 预期效果 |
+| # | Change | Purpose / expected effect |
 |---|---|---|
-| U1 ★ | **左侧实时音量条**（x=4, 6×244，草→黄→红三档） | 声控游戏最关键的是"我有没有被听见"。原来只能靠嘴张开幅度间接感知。高度量化到 6px 一档，静音时整体透明 |
-| U2 | 得分闪白 200ms | 过管这件事在余光里也能看见（原来只是一个数字变一下） |
-| U3 | 提示语改为纸胶囊（纸底 + 2px 墨边 + `UI_SUB` 文字） | 原来白字直接压在草绿上，对比度约 **2.2:1** 看不清；改后约 6:1，且与整机 `ui_pixel_hint_pill` 规范一致 |
-| U4 | 提示文案缩短为单行 `"叫↑ 静↓ OK拍爪"` | 原文 13 个汉字 ≈221px > 容器 216px 会折成两行压在草地上 |
-| U5 | 段位评级补一档 20 分：`"全小区的狗都跟着你叫"` | 强化高分局的成就感（纯文案，不影响玩法） |
-| U6 | 新增音效 `game_sfx`：过管清脆一声 / 死亡下行两音 / 破纪录三音上行 | 反馈闭环补全。16kHz 方波走 `bsp_audio_write`，**与采音全双工共存**（TX/RX 是两条独立 I2S handle，`esp_codec_dev_read/write` 无共享锁） |
-| U7 | 气泡不再被顶栏压住 | 狗贴顶时气泡 y 夹到 `GC_TOP+2` 以下 |
+| U1 (key) | **Real-time volume bar on the left** (x=4, 6x244, three tiers grass -> yellow -> red) | The most important thing in a voice-controlled game is "am I being heard". Before, it could only be sensed indirectly from how wide the mouth opened. Height is quantized to 6px steps, and the whole bar is transparent when silent |
+| U2 | Score flashes white for 200ms | Passing a pipe is visible even in peripheral vision (before, only a number changed) |
+| U3 | Hint changed to a paper capsule (paper base + 2px ink border + `UI_SUB` text) | White text directly over grass green had a contrast of only about **2.2:1** and was hard to read; now about 6:1, and consistent with the device-wide `ui_pixel_hint_pill` standard |
+| U4 | Hint text shortened to a single line `"Loud=up Quiet=down OK=jump"` | The original 13 Chinese characters were ~221px wide, over the 216px container, and wrapped to two lines on the grass |
+| U5 | Rating tier added at 20 points: `"The whole block barks"` | Strengthens the sense of achievement in high-score rounds (copy only, no gameplay impact) |
+| U6 | New sound effects `game_sfx`: crisp beep on passing a pipe / two descending tones on death / three rising tones on a new best | Completes the feedback loop. 16kHz square wave via `bsp_audio_write`, **coexisting with mic capture in full duplex** (TX/RX are two independent I2S handles, and `esp_codec_dev_read/write` share no lock) |
+| U7 | The bubble is no longer covered by the top bar | When the dog hugs the top, the bubble y is clamped below `GC_TOP+2` |
 
 ---
 
-## 五、可能影响原有平衡的项目与回退方案
+## 5. Items that might affect the original balance, and how to roll back
 
-> 结论先说：**没有任何一项改变难度数值**（速度、缺口、推力映射、判定盒全部原值）。
-> 以下是"会改变玩家感受/节奏"的项，均提供一行回退。
+> Conclusion first: **no item changes any difficulty value** (speed, gap, thrust mapping and hitboxes all keep their original values).
+> The following are the items that "change the player's feel/rhythm", each with a one-line rollback.
 
-| 项 | 影响 | 回退方案 |
+| Item | Impact | Rollback |
 |---|---|---|
-| **F3 死亡演出（≈530ms）** | 死后到能重开多了约 0.5 秒。不改变得分判定，只改变节奏。手速快的玩家会觉得"慢" | `app_game.cc` 顶部把 `kDeathFallFrames` 改 `0`、`kPanelAnimFrames` 改 `1`，即回到"立刻弹结算" |
-| **F3 按 OK 快进** | 改变了 DEAD 态 OK 键的语义（坠落中是"快进"而非"重开"）。理论上习惯了连按重开的玩家会多按一次 | 把 `game_on_key` 的 `case GC_DEAD` 里 `if (s_dying > 0)` 分支删掉，恢复成无条件 `start_run()` |
-| **P4 EMA 首块播种** | 麦克风响应快约 64ms。严格来说"开始叫到起飞"的延迟变短了，会让老玩家觉得更灵敏 | `game_mic.c` 里改回 `ema = (ema * 3u + mean) / 4u;`（删掉三元判断） |
-| **U1 音量条** | 新增视觉元素，占屏幕左侧 6px 宽。管道会从它"后面"穿过（HUD 层级） | 删掉 `build_vu(s_screen);` 一行 + `update_vu(thrust);` 一行 |
-| **U6 音效** | 新增声音。若设备扬声器/ codec 状态异常会静默跳过（`bsp_audio_write` 失败只告警一次并自行静音），不影响玩法 | `app_game.cc` 顶部 `constexpr bool kSfxEnabled = false;`（一行，不再建任务，零开销） |
-| **U3/U4 提示胶囊与文案** | 外观变了（从白字变成纸胶囊） | 把 `build_ui()` 里提示语那段改回 `px_label(s_screen, "", &buddy_font_16, 0xFFFFFF, ...)` 并去掉背景样式 |
-| **U5 新增 20 分段位** | 纯文案，零玩法影响 | 删掉 `if (score >= 20)` 那一行 |
+| **F3 death presentation (~530ms)** | About 0.5s more between death and being able to restart. Does not change score judgment, only the rhythm. Fast-handed players will find it "slow" | At the top of `app_game.cc` set `kDeathFallFrames` to `0` and `kPanelAnimFrames` to `1` to return to "pop up the result immediately" |
+| **F3 OK fast-forward** | Changes the meaning of the OK key in the DEAD state (during the fall it is "fast-forward", not "restart"). In theory players used to mashing to restart will press once more | Delete the `if (s_dying > 0)` branch in `case GC_DEAD` of `game_on_key`, restoring an unconditional `start_run()` |
+| **P4 EMA first-block seeding** | Mic response is faster by about 64ms. Strictly speaking the delay from "starting to bark" to "taking off" is shorter, so veteran players find it more sensitive | In `game_mic.c` change back to `ema = (ema * 3u + mean) / 4u;` (remove the ternary) |
+| **U1 volume bar** | A new visual element, taking 6px of width on the left of the screen. Pipes pass "behind" it (HUD layer order) | Delete the `build_vu(s_screen);` line and the `update_vu(thrust);` line |
+| **U6 sound effects** | New sound. If the device speaker / codec state is abnormal it is silently skipped (a failed `bsp_audio_write` warns once and mutes itself), with no gameplay impact | At the top of `app_game.cc`, `constexpr bool kSfxEnabled = false;` (one line, no task is created, zero overhead) |
+| **U3/U4 hint capsule and text** | Appearance changed (from white text to a paper capsule) | In `build_ui()` change the hint section back to `px_label(s_screen, "", &buddy_font_16, 0xFFFFFF, ...)` and remove the background style |
+| **U5 new 20-point tier** | Copy only, zero gameplay impact | Delete the `if (score >= 20)` line |
 
-### 想真正调难度时
+### When you really want to tune difficulty
 
-全部集中在 `game_core.h` 的"难度曲线调参区"，6 个宏：
-`GC_BASE_SPEED` / `GC_SPEED_GAIN` / `GC_SPEED_BONUS_MAX` / `GC_SPACING` / `GC_GAP_START` / `GC_GAP_MIN` / `GC_GAP_SHRINK` / `GC_GAP_STEP_MAX`。
-每个都标了"调大/调小"的后果。**全部改回当前值即完全回到原平衡。**
+Everything is gathered in the "difficulty curve tuning area" of `game_core.h`, 6 macros:
+`GC_BASE_SPEED` / `GC_SPEED_GAIN` / `GC_SPEED_BONUS_MAX` / `GC_SPACING` / `GC_GAP_START` / `GC_GAP_MIN` / `GC_GAP_SHRINK` / `GC_GAP_STEP_MAX`.
+Each is annotated with the consequence of raising/lowering it. **Setting them all back to the current values returns fully to the original balance.**
 
-声控阈值在 `app_game.cc` 顶部：`kVolFloor`（环境吵 → 调高）、`kVolFull`（叫不动 → 调低）。
-
----
-
-## 六、仍值得进一步优化的方向（按性价比排序）
-
-1. **自适应噪声底（AGC）**：`kVolFloor` 目前是固定 150。安静房间和嘈杂环境的手感差异很大。
-   可以做"开局前 1 秒采样环境底噪 → 自动抬高 FLOOR"。**风险**：改的是核心手感，必须先做 A/B 实测。
-2. **管道改用 canvas / 直接 `esp_lcd_panel_draw_bitmap` 自绘**：
-   现在每帧要 invalidate 狗 + 3 根管道（12 个对象），LVGL 会把它们合并成数个脏区分别 flush。
-   自绘可以只推一次整屏。**代价**：要接管面板、与 `app_registry` 过渡屏机制并存，且 C3 放不下 150KB 全屏缓冲（只能行缓冲）。工作量大，先测 `max_tick` 日志再决定。
-3. **`stop()` 后复用屏幕对象**：现在每次进出游戏都要重建/销毁 ~40 个 `lv_obj`（建屏耗时、堆抖动）。
-   可考虑常驻一个隐藏的游戏屏。**代价**：常驻占 ~5KB 堆，与"App 互斥、stop 全量回收"的内存策略冲突，需要权衡。
-4. **更细的死亡反馈**：区分"撞上沿 / 撞下沿 / 落地"给不同的摔落姿态与音效（现在只有一种）。
-5. **缺口的"预告"**：高分段（速度封顶后）管道间隔只剩 1.1s，可在屏幕右侧边缘预画下一根缺口的指示箭头，降低"来不及反应"的挫败感。
-6. **音效丰富度**：现在只有 3 个音。可以加"起飞滑音""连击升调"（每连续过 3 根音高 +1）等，成本极低（只改 `game_sfx.c` 的音色表）。
-7. **掉帧可观测性**：`tick()` 已有 1 秒汇总日志（`frame drops: n/30 max_tick=Xms`）。建议真机跑一局把这条日志捞出来，作为上面第 2 项是否值得做的依据。
-8. **`game_mic_ready()` 的实际使用**：目前只暴露了接口。可以在热机那 160ms 显示"准备…"，而不是让狗白白下沉。
+The voice thresholds are at the top of `app_game.cc`: `kVolFloor` (noisy room -> raise) and `kVolFull` (cannot get it to climb -> lower).
 
 ---
 
-## 七、验证状态（已上机实测）
+## 6. Directions still worth optimizing (by cost-effectiveness)
 
-编译：`_diag/build_game_opt.log` → `BUILD_EXIT=0`，零 warning。
-烧录：Windows esptool v5.4.0 → COM3 @460800，三段均 `Hash of data verified`，
-固件 3,179,952 B（0x3085b0），app 分区剩余 24%。
+1. **Adaptive noise floor (AGC)**: `kVolFloor` is currently a fixed 150. The feel differs a lot between a quiet room and a noisy environment.
+   One could sample the ambient noise floor for 1 second before the round -> automatically raise FLOOR. **Risk**: this changes the core feel, so A/B testing on hardware must come first.
+2. **Draw the pipes with a canvas / direct `esp_lcd_panel_draw_bitmap`**:
+   Currently each frame invalidates the dog + 3 pipes (12 objects), and LVGL merges them into several dirty regions flushed separately.
+   Self-drawing could push the whole screen only once. **Cost**: it must take over the panel, coexist with the `app_registry` transition-screen mechanism, and the C3 cannot fit a 150KB full-screen buffer (line buffering only). Large effort; check the `max_tick` log first and then decide.
+3. **Reuse the screen object after `stop()`**: every entry/exit currently rebuilds/destroys ~40 `lv_obj`s (build time, heap churn).
+   One could keep a hidden game screen resident. **Cost**: it permanently occupies ~5KB of heap, conflicting with the memory policy of "apps run mutually exclusively, stop reclaims everything"; needs weighing.
+4. **Finer death feedback**: give different fall poses and sounds for "hit the upper edge / hit the lower edge / hit the ground" (currently only one).
+5. **Gap "preview"**: in the high-score range (after speed is capped) the pipe interval is only 1.1s; an indicator arrow for the next gap could be pre-drawn at the right screen edge, reducing the frustration of "no time to react".
+6. **Richer sound effects**: currently only 3 tones. Could add a "takeoff glissando", "combo pitch rise" (pitch +1 for every 3 consecutive pipes), etc., at very low cost (only the tone table in `game_sfx.c` changes).
+7. **Frame-drop observability**: `tick()` already has a 1-second summary log (`frame drops: n/30 max_tick=Xms`). Recommend running one round on hardware and collecting this log as the basis for whether item 2 above is worth doing.
+8. **Actual use of `game_mic_ready()`**: currently only the interface is exposed. It could show "Getting ready..." during the 160ms warm-up instead of letting the dog sink for nothing.
 
-真机结果（`_diag/game_reentry2.log`、`_diag/game_stay.log`）：
+---
 
-| 检查项 | 结果 |
+## 7. Verification status (tested on hardware)
+
+Build: `_diag/build_game_opt.log` -> `BUILD_EXIT=0`, zero warnings.
+Flashing: Windows esptool v5.4.0 -> COM3 @460800, all three segments `Hash of data verified`,
+firmware 3,179,952 B (0x3085b0), 24% of the app partition left.
+
+Hardware results (`_diag/game_reentry2.log`, `_diag/game_stay.log`):
+
+| Check | Result |
 |---|---|
-| 新代码确实进固件 | ELF 可查到 `game_sfx_play` / `game_sfx_start` / `game_mic_ready` / `set_text_cached` ✔ |
-| 无内存泄漏 | 连续 3 次进出：`started; free≈83KB` → `stopped; free=105,184`，`largest` 稳定在 51200/53248 不下降 → 无泄漏、无碎片 ✔ |
-| 采音每次都在 | 3 次进入均正常采音（`peak` 1923~3710，随环境噪声变化）；无 "旧采音任务未退出" 告警 → P2 重入修复生效 ✔ |
-| 音效 | 见下方 B1 |
-| 掉帧 | `frame drops: 5~10/30`，但 `max_tick` 仅 4~5ms |
+| New code really is in the firmware | ELF contains `game_sfx_play` / `game_sfx_start` / `game_mic_ready` / `set_text_cached` (OK) |
+| No memory leak | 3 consecutive enter/exit cycles: `started; free~83KB` -> `stopped; free=105,184`, `largest` stable at 51200/53248 without dropping -> no leak, no fragmentation (OK) |
+| Mic capture present every time | All 3 entries captured normally (`peak` 1923~3710, varying with ambient noise); no "old mic task did not exit" warning -> the P2 re-entry fix works (OK) |
+| Sound effects | See B1 below |
+| Dropped frames | `frame drops: 5~10/30`, but `max_tick` only 4~5ms |
 
-### B1 上机才暴露并修掉的问题：音效开局竞态
+### B1 A problem exposed and fixed only on hardware: sfx start-up race
 
-首次烧录后日志出现 `W game_sfx: bsp_audio_write 失败,本局关闭音效` —— **整局都没声音**。
+After the first flash the log showed `W game_sfx: bsp_audio_write failed, sfx disabled for this round` -- **no sound the whole round**.
 
-根因：`game_start()` 先建音效任务并立刻播 `GS_START`，而 codec 输出要等采音任务
-调 `bsp_audio_set_format()` 才 `output_opened`。实测 **14.473s 请求写、14.667s 才 open**，
-差约 200ms；旧逻辑"一次写失败就永久静音"把开局那一声变成了整局静音。
+Root cause: `game_start()` creates the sfx task first and immediately plays `GS_START`, while the codec output only becomes `output_opened` after the mic task
+calls `bsp_audio_set_format()`. Measured: **write requested at 14.473s, open at 14.667s**,
+a gap of about 200ms; the old logic "one failed write means permanent silence" turned the start tone into silence for the whole round.
 
-修法（`game_sfx.c`）：新增 `write_blocking()` —— 写失败按 20ms 步进**有界重试**，
-最多等 600ms；超时才判定 codec 不可用并只告警一次。修复后该告警消失。
+Fix (`game_sfx.c`): added `write_blocking()` -- on write failure it **retries with a bound** in 20ms steps,
+waiting at most 600ms; only on timeout does it decide the codec is unavailable and warn once. After the fix that warning is gone.
 
-### 看日志时别误判的两点
+### Two things not to misread in the logs
 
-- **安静环境下狗的死亡时间方差很大**（实测 2.5s ~ 9.4s），因为环境噪声本身会给推力
-  （同一次测试里出现过 `score=4`）。短暂停留没看到 `game over` 不等于卡死。
-- **退出应用要用长按 OK**（串口 `l`）。长按 DOWN（`k`）不是返回键，发了只会打印一行
-  `Dispatch Key ... cur_active=N` 然后毫无反应，容易误判成按键失效。
+- **In a quiet environment the dog's time of death varies a lot** (measured 2.5s ~ 9.4s), because ambient noise itself provides thrust
+  (`score=4` appeared in the same test). Not seeing `game over` after a short wait does not mean it froze.
+- **Exit the app with a long-press of OK** (serial `l`). A long-press of DOWN (`k`) is not the back key; sending it only prints one line
+  `Dispatch Key ... cur_active=N` and then nothing happens, which is easily misread as a dead key.
 
-### 关于残留掉帧
+### About the remaining dropped frames
 
-`max_tick=4~5ms` 说明游戏逻辑本身很轻，45ms+ 的帧间隔来自 SPI 整屏 flush 与 Wi-Fi 共存，
-**不是本次改动引入的**。是否值得为此上"方向 2（自绘/行缓冲）"，取决于能否接受当前手感；
-若要做，先按方向 7 把 `frame drops` 日志长时间采样一遍再决策。
+`max_tick=4~5ms` shows the game logic itself is very light; the 45ms+ frame interval comes from SPI full-screen flush coexisting with Wi-Fi,
+and is **not introduced by this change**. Whether it is worth taking "direction 2 (self-drawing / line buffering)" depends on whether the current feel is acceptable;
+if so, first sample the `frame drops` log over a long time per direction 7 before deciding.

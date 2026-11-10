@@ -1,5 +1,5 @@
 // components/bsp/src/bsp_audio.c
-// 移植自 trae_card/components/platform/platform_esp32/src/audio_es8311.c
+// Ported from trae_card/components/platform/platform_esp32/src/audio_es8311.c
 #include "bsp_audio.h"
 #include "bsp_audio_volume.h"
 #include "bsp_i2c.h"
@@ -22,7 +22,7 @@ static const audio_codec_data_if_t *s_data;
 static const audio_codec_if_t *s_codec;
 static const audio_codec_gpio_if_t *s_gpio;
 static bool s_tx_primed, s_rx_primed;
-// 记录当前已打开的格式,用于判断"要不要 close 重开"(见头文件里的坑说明)。
+// Records the currently opened format, to decide "whether to close and reopen" (see the pitfall note in the header).
 static uint32_t s_hz;
 static uint8_t  s_bits, s_ch;
 static bool     s_opened;
@@ -61,9 +61,9 @@ static esp_err_t i2s_profile_init(audio_profile_t profile) {
         .intr_priority = 0,
     };
     esp_err_t e = i2s_new_channel(&chan, tx ? &s_tx : NULL, rx ? &s_rx : NULL);
-    if (e != ESP_OK) { ESP_LOGE(TAG, "i2s_new_channel 失败: %s", esp_err_to_name(e)); return e; }
+    if (e != ESP_OK) { ESP_LOGE(TAG, "i2s_new_channel failed: %s", esp_err_to_name(e)); return e; }
 
-    // 这里的采样率只用于建通道;实际速率由 esp_codec_dev_open() 按需重配。
+    // The sample rate here is only used to build the channel; the actual rate is reconfigured on demand by esp_codec_dev_open().
     i2s_std_config_t std = {
         .clk_cfg = {
             .sample_rate_hz = 16000,
@@ -91,14 +91,14 @@ static esp_err_t i2s_profile_init(audio_profile_t profile) {
         },
     };
     if (s_tx && (e = i2s_channel_init_std_mode(s_tx, &std)) != ESP_OK) {
-        ESP_LOGE(TAG, "i2s tx 初始化失败: %s", esp_err_to_name(e)); return e;
+        ESP_LOGE(TAG, "i2s tx init failed: %s", esp_err_to_name(e)); return e;
     }
     if (s_rx && (e = i2s_channel_init_std_mode(s_rx, &std)) != ESP_OK) {
-        ESP_LOGE(TAG, "i2s rx 初始化失败: %s", esp_err_to_name(e)); return e;
+        ESP_LOGE(TAG, "i2s rx init failed: %s", esp_err_to_name(e)); return e;
     }
-    // esp_codec_dev_open 内部重配前会先 i2s_channel_disable,而 disable 要求通道处于
-    // RUNNING;刚 init 的通道是 READY,会打一条 "channel has not been enabled yet" 错误日志。
-    // 这里先 enable 一次让那次 disable 合法(此时 codec 未配,不出声)。
+    // Before reconfiguring, esp_codec_dev_open internally calls i2s_channel_disable first, and disable requires the channel to be
+    // RUNNING; a freshly init-ed channel is READY, which logs a "channel has not been enabled yet" error.
+    // So enable once here to make that disable legal (the codec is not configured yet, so no sound).
     if (s_tx) {
         e = i2s_channel_enable(s_tx);
         if (e != ESP_OK) return e;
@@ -121,23 +121,23 @@ static esp_err_t audio_init(audio_profile_t profile) {
 
     s_ctrl = audio_codec_new_i2c_ctrl(&(audio_codec_i2c_cfg_t){
         .port = BSP_I2C_PORT,
-        .addr = BSP_I2C_ES8311_ADDR << 1,   // 该接口要 8 位地址形式
+        .addr = BSP_I2C_ES8311_ADDR << 1,   // this interface wants the 8-bit address form
         .bus_handle = bsp_i2c_bus(),
     });
     if (!s_ctrl) {
-        ESP_LOGE(TAG, "ES8311 控制口创建失败 —— 用 bsp_i2c_scan() 确认 0x%02X 是否应答;"
-                      "检查 SDA=GPIO%d / SCL=GPIO%d 接线与 codec 供电",
+        ESP_LOGE(TAG, "ES8311 control port creation failed - use bsp_i2c_scan() to check whether 0x%02X ACKs; "
+                      "check SDA=GPIO%d / SCL=GPIO%d wiring and codec power",
                  BSP_I2C_ES8311_ADDR, BSP_I2C_SDA, BSP_I2C_SCL);
         return ESP_FAIL;
     }
 
-    // 对齐官方 folo-ai-passport-xiaozhi (es8311_audio_codec.cc:64-73):
-    // 初始化时对 ES8311 进行软件复位 (REG 0x00 = 0x1F) 并延时 5ms，
-    // 复位数字块、CSM 时钟状态机及调制器，消除芯片上电/热重启残留时钟状态引起的数字电流声。
+    // Aligned with the official folo-ai-passport-xiaozhi (es8311_audio_codec.cc:64-73):
+    // on init, soft-reset the ES8311 (REG 0x00 = 0x1F) and wait 5ms,
+    // resetting the digital block, CSM clock state machine and modulator, eliminating digital current noise caused by leftover clock state from power-up/warm reboot.
     uint8_t reset_val = 0x1F;
     s_ctrl->write_reg(s_ctrl, 0x00, 1, &reset_val, 1);
     vTaskDelay(pdMS_TO_TICKS(5));
-    ESP_LOGI(TAG, "ES8311 芯片级软件复位完成 (REG00=0x1F)");
+    ESP_LOGI(TAG, "ES8311 chip-level soft reset done (REG00=0x1F)");
 
     if ((e = i2s_profile_init(profile)) != ESP_OK) {
         bsp_audio_deinit();
@@ -147,7 +147,7 @@ static esp_err_t audio_init(audio_profile_t profile) {
     s_data = audio_codec_new_i2s_data(&(audio_codec_i2s_cfg_t){
         .port = BSP_I2S_PORT, .tx_handle = s_tx, .rx_handle = s_rx,
     });
-    if (!s_data) { ESP_LOGE(TAG, "I2S 数据口创建失败"); bsp_audio_deinit(); return ESP_FAIL; }
+    if (!s_data) { ESP_LOGE(TAG, "I2S data port creation failed"); bsp_audio_deinit(); return ESP_FAIL; }
 
     s_gpio = audio_codec_new_gpio();
     if (!s_gpio) { bsp_audio_deinit(); return ESP_ERR_NO_MEM; }
@@ -159,17 +159,17 @@ static esp_err_t audio_init(audio_profile_t profile) {
                        s_tx ? ESP_CODEC_DEV_WORK_MODE_DAC : ESP_CODEC_DEV_WORK_MODE_ADC,
         .pa_pin      = BSP_I2S_PA_CTRL,
         .pa_reverted = false,
-        .master_mode = false,          // MCU I2S 为 master,codec 为 slave
+        .master_mode = false,          // MCU I2S is master, codec is slave
         .use_mclk    = true,
         // Match the reference firmware's voltage calibration. This is not a
         // measured PA supply: change playback gain through the volume curve,
         // not by inventing a different board voltage.
         .hw_gain     = { .pa_voltage = 5.0f, .codec_dac_voltage = 3.3f },
-        // ⚠ 单声道纯麦克风录音必须为 true。false 会让驱动写 REG44=0x58 进入
-        //   ADCL+DACR 参考模式,单声道读到的那一路是 DAC 参考 → 【录音恒为 0】。
+        // WARNING: must be true for mono pure-microphone recording. false makes the driver write REG44=0x58 into
+        //   ADCL+DACR reference mode, and the channel read in mono is the DAC reference -> [recording is always 0].
         .no_dac_ref  = true,
     });
-    if (!s_codec) { ESP_LOGE(TAG, "es8311_codec_new 失败"); bsp_audio_deinit(); return ESP_FAIL; }
+    if (!s_codec) { ESP_LOGE(TAG, "es8311_codec_new failed"); bsp_audio_deinit(); return ESP_FAIL; }
 
     s_dev = esp_codec_dev_new(&(esp_codec_dev_cfg_t){
         .dev_type = s_tx && s_rx ? ESP_CODEC_DEV_TYPE_IN_OUT :
@@ -177,14 +177,14 @@ static esp_err_t audio_init(audio_profile_t profile) {
         .codec_if = s_codec,
         .data_if  = s_data,
     });
-    if (!s_dev) { ESP_LOGE(TAG, "esp_codec_dev_new 失败"); bsp_audio_deinit(); return ESP_FAIL; }
+    if (!s_dev) { ESP_LOGE(TAG, "esp_codec_dev_new failed"); bsp_audio_deinit(); return ESP_FAIL; }
 
     if (s_tx && bsp_audio_volume_configure(s_dev) != 0) {
-        ESP_LOGE(TAG, "输出音量曲线配置失败");
+        ESP_LOGE(TAG, "Output volume curve config failed");
         bsp_audio_deinit();
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "ES8311 就绪(80%% 以下保留低噪声曲线, 最高 +6dB)");
+    ESP_LOGI(TAG, "ES8311 ready (low-noise curve below 80%%, max +6dB)");
     return ESP_OK;
 }
 
@@ -263,13 +263,13 @@ void bsp_audio_prepare_sleep(void) {
 
 static esp_err_t set_format(uint32_t hz, uint8_t bits, uint8_t ch) {
     if (!s_dev) return ESP_ERR_INVALID_STATE;
-    if (s_opened && s_hz == hz && s_bits == bits && s_ch == ch) return ESP_OK;   // 同格式复用
+    if (s_opened && s_hz == hz && s_bits == bits && s_ch == ch) return ESP_OK;   // same format, reuse
 
     if (s_opened) {
         esp_codec_dev_close(s_dev);
         s_opened = false;
-        // close 把 I2S 通道退回 READY,而接下来的 open 内部又会 disable 一次 →
-        // 会打 "channel has not been enabled yet"。补一次 enable 让它合法。
+        // close returns the I2S channel to READY, and the open that follows disables once more internally ->
+        // it would log "channel has not been enabled yet". Enable once more to make it legal.
         if (s_tx) s_tx_primed = i2s_channel_enable(s_tx) == ESP_OK;
         if (s_rx) s_rx_primed = i2s_channel_enable(s_rx) == ESP_OK;
     }
@@ -277,34 +277,34 @@ static esp_err_t set_format(uint32_t hz, uint8_t bits, uint8_t ch) {
     esp_codec_dev_sample_info_t fs = {
         .bits_per_sample = bits,
         .channel = ch,
-        .channel_mask = 0,           // 对齐官方 folo-ai-passport-xiaozhi: 0 会启用 I2S_STD_SLOT_BOTH 驱动双槽，避免单槽悬空引入高频时钟振铃
+        .channel_mask = 0,           // aligned with the official folo-ai-passport-xiaozhi: 0 enables I2S_STD_SLOT_BOTH to drive both slots, avoiding high-frequency clock ringing from a floating single slot
         .sample_rate = hz,
-        .mclk_multiple = 0,          // 0 → 驱动按默认 256xfs 取 MCLK
+        .mclk_multiple = 0,          // 0 -> the driver uses the default 256xfs for MCLK
     };
     int r = esp_codec_dev_open(s_dev, &fs);
     s_tx_primed = s_rx_primed = false; // codec/data interfaces now own channel state
     if (r != 0) {
         // esp_codec_dev_open marks input/output opened before set_fs/enable.
         // Clear that partial state or the next retry can return a false success.
-        ESP_LOGE(TAG, "esp_codec_dev_open 失败: %d", r);
+        ESP_LOGE(TAG, "esp_codec_dev_open failed: %d", r);
         esp_codec_dev_close(s_dev);
         return ESP_FAIL;
     }
 
-    // ⚠ open 之后【不要】手动覆写 ES8311 的时钟分频寄存器(REG01~06):
-    //   驱动已按采样率与 MCLK 精确算好,覆写会导致 ADC/DAC 时序错乱、录音回放全是杂音。
-    //   这里只恢复麦克风模拟 PGA 增益和逻辑音量。close/open 会重置 codec 的输出
-    //   状态；若不恢复，16kHz 录音切到 24kHz TTS 后可能保持静音。
+    // WARNING: after open, [do not] manually overwrite the ES8311 clock divider registers (REG01~06):
+    //   the driver has computed them exactly from the sample rate and MCLK; overwriting garbles ADC/DAC timing and recording/playback is all noise.
+    //   Only restore the microphone analog PGA gain and logical volume here. close/open resets the codec output
+    //   state; without restoring it, switching from 16kHz recording to 24kHz TTS may stay silent.
     if (s_rx) esp_codec_dev_set_in_gain(s_dev, 30.0f);
     const uint8_t actual_volume = bsp_audio_volume_effective(s_requested_volume, s_master_volume);
     if (s_tx && bsp_audio_volume_apply(s_dev, s_requested_volume, s_master_volume) != 0) {
-        ESP_LOGE(TAG, "恢复输出音量失败: %u%%", actual_volume);
+        ESP_LOGE(TAG, "Failed to restore output volume: %u%%", actual_volume);
         esp_codec_dev_close(s_dev);
         return ESP_FAIL;
     }
 
     s_opened = true; s_hz = hz; s_bits = bits; s_ch = ch;
-    ESP_LOGI(TAG, "codec 打开 %luHz/%ubit/%uch, 输出音量 %u%%",
+    ESP_LOGI(TAG, "codec opened %luHz/%ubit/%uch, output volume %u%%",
              (unsigned long)hz, bits, ch, actual_volume);
     return ESP_OK;
 }
@@ -321,13 +321,13 @@ esp_err_t bsp_audio_write(const void *pcm, size_t bytes) {
     return esp_codec_dev_write(s_dev, (void *)pcm, bytes) == 0 ? ESP_OK : ESP_FAIL;
 }
 
-// 阻塞读, 不设超时(有意为之, 2026-08-29 审查确认)。esp_codec_dev_read 底层是
-// i2s_channel_read(..., portMAX_DELAY): I2S RX 由 MCLK 硬件时钟驱动, 只要通道
-// 使能就按 16kHz 稳定产出 DMA 描述符, "读不回来"意味着时钟或 DMA 已经死了 ——
-// 那种状态下加超时只会把一个可诊断的死等(任务栈上看得见卡在哪)变成一串
-// ESP_FAIL 与静音帧。调用方(audio_streamer 的 audio_worker)是专用任务, 优先级
-// 低于喂狗 IDLE, 卡住不会拖垮系统; 会话结束由 s_active 标志退出循环, 最后一次
-// read 返回后才检查, 所以最坏多等一块(100ms)。
+// Blocking read with no timeout (intentional, confirmed in the 2026-08-29 review). esp_codec_dev_read is built on
+// i2s_channel_read(..., portMAX_DELAY): I2S RX is driven by the MCLK hardware clock, and as long as the channel
+// is enabled it produces DMA descriptors steadily at 16kHz; "a read never returns" means the clock or DMA is already dead -
+// in that state a timeout would only turn a diagnosable hang (visible on the task stack) into a string of
+// ESP_FAIL and silent frames. The caller (audio_worker in audio_streamer) is a dedicated task whose priority
+// is below the watchdog-feeding IDLE, so a hang will not take the system down; at session end the loop exits via the s_active flag, checked only after the last
+// read returns, so the worst case waits one extra block (100ms).
 esp_err_t bsp_audio_read(void *pcm, size_t bytes) {
     if (!s_dev || !s_opened || !s_rx) return ESP_ERR_INVALID_STATE;
     return esp_codec_dev_read(s_dev, pcm, bytes) == 0 ? ESP_OK : ESP_FAIL;
@@ -338,7 +338,7 @@ void bsp_audio_set_volume(uint8_t percent) {
     if (percent > 100) percent = 100;
     s_requested_volume = percent;
     if (s_opened && s_tx && bsp_audio_volume_apply(s_dev, s_requested_volume, s_master_volume) != 0) {
-        ESP_LOGW(TAG, "应用音量设置失败");
+        ESP_LOGW(TAG, "Failed to apply app volume");
     }
     control_unlock();
 }
@@ -348,9 +348,9 @@ void bsp_audio_set_master_volume(uint8_t percent) {
     if (percent > 100) percent = 100;
     s_master_volume = percent;
     if (s_opened && s_tx && bsp_audio_volume_apply(s_dev, s_requested_volume, s_master_volume) != 0) {
-        ESP_LOGW(TAG, "系统音量设置失败");
+        ESP_LOGW(TAG, "Failed to set system volume");
     }
-    ESP_LOGI(TAG, "主音量=%u%%, 应用=%u%%, 输出=%u%%", s_master_volume,
+    ESP_LOGI(TAG, "master volume=%u%%, app=%u%%, output=%u%%", s_master_volume,
              s_requested_volume, bsp_audio_volume_effective(s_requested_volume, s_master_volume));
     control_unlock();
 }

@@ -161,7 +161,7 @@ void WifiManager::StartStation() {
 
     station_->Start();
     station_active_ = true;
-    // esp_wifi_set_ps 档位不跨 start 保留,每次启动后重放记忆的期望档位
+    // esp_wifi_set_ps level is not kept across start; replay the remembered desired level after each start
     station_->SetPowerSaveLevel(desired_ps_level_);
 }
 
@@ -338,8 +338,8 @@ bool WifiManager::ConfigureNetwork(const std::string& ssid,
 
 void WifiManager::SetPowerSaveLevel(WifiPowerSaveLevel level) {
     std::lock_guard<std::mutex> lock(mutex_);
-    // 开机早期(Initialize 前)与配置 AP 模式下 station 不在运行:只记忆档位,
-    // 等下次 StartStation 时生效,调用方无需关心时序。
+    // Early boot (before Initialize) and in config AP mode the station is not running: only remember the level,
+    // it takes effect on the next StartStation, so callers need not care about timing.
     desired_ps_level_ = level;
     if (!station_active_ || !station_) {
         return;

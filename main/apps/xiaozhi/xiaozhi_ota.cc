@@ -20,15 +20,15 @@ namespace xiaozhi {
 namespace {
 
 constexpr int kHttpTimeoutMs = 10000;
-constexpr size_t kRespCap = 1024;   // 官方 OTA 响应实测约 500 字节
+constexpr size_t kRespCap = 1024;   // Official OTA response measured at about 500 bytes
 constexpr const char *kDefaultOtaUrl = "https://api.tenclass.net/xiaozhi/ota/";
 
 int s_last_http_status = 0;
 
-// 必须放在【静态存储】而不是栈上：这一层已经要跑 mbedTLS 握手 + NVS/SPI-Flash
-// 读取，本身就是设备上最深的调用链；再往栈上放 2KB 缓冲会直接把控制任务压爆
-// （真机实测：栈指针越过栈下限 40 字节 → "Stack protection fault" → 重启）。
-// 该函数只在控制任务里被调用，因此单个静态实例是安全的。
+// Must live in STATIC storage, not on the stack: this layer already runs an mbedTLS handshake + NVS/SPI-Flash
+// reads, the deepest call chain on the device; putting another 2KB buffer on the stack would overflow the control task
+// (measured on device: stack pointer passed the stack limit by 40 bytes -> "Stack protection fault" -> reboot).
+// This function is only called from the control task, so a single static instance is safe.
 struct RespBuf {
     char data[kRespCap];
     size_t len;
@@ -58,9 +58,9 @@ std::string MacString() {
     return buf;
 }
 
-// 官方协议:每台设备一个稳定的 Client-Id(UUID v4),首次启动生成并持久化。
-// 空着也能拿到验证码(服务器按 Device-Id 兜底),但绑定/后续交互都以
-// Client-Id 为身份锚点,照规范补齐。
+// Official protocol: each device has a stable Client-Id (UUID v4), generated on first boot and persisted.
+// A verification code can be obtained even without it (the server falls back to Device-Id), but binding and later interaction
+// both anchor identity on Client-Id, so fill it in per the spec.
 std::string EnsureClientId() {
     std::string id = store_get_string(kNsXiaozhi, "client_id", "");
     if (!id.empty()) return id;
@@ -86,10 +86,10 @@ void ApplyServerTime(const cJSON *root) {
     const cJSON *ts = cJSON_GetObjectItem(st, "timestamp");
     if (!cJSON_IsNumber(ts)) return;
 
-    // 官方这里给的是毫秒；也有服务端给秒。两种都兜住。
+    // The official server gives milliseconds here; some servers give seconds. Handle both.
     double raw = ts->valuedouble;
     time_t secs = (raw > 1e11) ? (time_t)(raw / 1000.0) : (time_t)raw;
-    if (secs < 1600000000) return;   // 明显不合理的值就不设了
+    if (secs < 1600000000) return;   // clearly implausible value: do not set it
 
     struct timeval tv = {};
     tv.tv_sec = secs;
@@ -98,7 +98,7 @@ void ApplyServerTime(const cJSON *root) {
     ESP_LOGI(TAG, "System time set from server: %lld", (long long)secs);
 }
 
-// 上报设备信息，官方服务端据此识别机型/版本。字段取自官方 Board::GetJson() 的子集。
+// Report device info; the official server uses it to identify model/version. Fields are a subset of the official Board::GetJson().
 std::string BuildBoardJson(const std::string &client_id) {
     cJSON *root = cJSON_CreateObject();
     if (root == nullptr) return "{}";
@@ -198,7 +198,7 @@ OtaOutcome ota_fetch_config() {
 
     ApplyServerTime(root);
 
-    // 1) 激活段：设备还没被绑定
+    // 1) Activation section: the device is not bound yet
     const cJSON *activation = cJSON_GetObjectItem(root, "activation");
     if (cJSON_IsObject(activation)) {
         const cJSON *code = cJSON_GetObjectItem(activation, "code");
@@ -212,7 +212,7 @@ OtaOutcome ota_fetch_config() {
         return out;
     }
 
-    // 2) websocket 段：真正的对话凭据
+    // 2) websocket section: the actual conversation credentials
     const cJSON *ws = cJSON_GetObjectItem(root, "websocket");
     if (cJSON_IsObject(ws)) {
         const cJSON *url = cJSON_GetObjectItem(ws, "url");
@@ -223,11 +223,11 @@ OtaOutcome ota_fetch_config() {
         if (cJSON_IsNumber(ver)) out.version = ver->valueint;
 
         if (!out.url.empty()) {
-            // 同时落到官方同名命名空间，便于与官方固件/后台配置互认
+            // Also store under the official same-named namespace, so it is recognized by official firmware/backend config
             store_set_string(kNsWebsocket, "url", out.url);
             if (!out.token.empty()) store_set_string(kNsWebsocket, "token", out.token);
             if (out.version > 0) store_set_int(kNsWebsocket, "version", out.version);
-            // 本应用自己的命名空间（优先读取）
+            // This app's own namespace (read first)
             store_set_string(kNsXiaozhi, "ws_url", out.url);
             if (!out.token.empty()) store_set_string(kNsXiaozhi, "token", out.token);
             if (out.version > 0) store_set_int(kNsXiaozhi, "version", out.version);

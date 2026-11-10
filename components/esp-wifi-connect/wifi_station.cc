@@ -41,7 +41,7 @@ WifiStation::WifiStation() {
     // Create the event group
     event_group_ = xEventGroupCreate();
 
-    // 读取配置
+    // Read configuration
     nvs_handle_t nvs;
     esp_err_t err = nvs_open("wifi", NVS_READONLY, &nvs);
     if (err != ESP_OK) {
@@ -398,8 +398,8 @@ void WifiStation::SetPowerSaveLevel(WifiPowerSaveLevel level) {
             ESP_LOGI(TAG, "Setting WiFi power save level: PERFORMANCE (NONE)");
             break;
     }
-    // station 可能处于启动/停止过渡态,set_ps 会报错;记日志即可,期望档位由
-    // WifiManager 记忆并在 StartStation 后重放,不允许这里 abort 拖死整机。
+    // The station may be in a start/stop transition and set_ps will report an error; just log it. The desired level is
+    // remembered by WifiManager and replayed after StartStation; aborting here and killing the whole device is not allowed.
     esp_err_t ps_err = esp_wifi_set_ps(ps_type);
     if (ps_err != ESP_OK) {
         ESP_LOGW(TAG, "esp_wifi_set_ps(%d) failed: %s", (int)ps_type, esp_err_to_name(ps_err));

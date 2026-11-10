@@ -22,11 +22,8 @@ SECRET_PATTERNS = {
 }
 ROOT_MARKDOWN_ALLOWLIST = {
     "AGENTS.md",
-    "AGENTS.zh_CN.md",
     "CLAUDE.md",
-    "CLAUDE.zh_CN.md",
     "README.md",
-    "README.zh_CN.md",
 }
 
 
@@ -57,10 +54,8 @@ def text_files() -> list[Path]:
 def check_required_files(errors: list[str]) -> None:
     required = (
         "AGENTS.md",
-        "AGENTS.zh_CN.md",
-        "CLAUDE.md",
-        "CLAUDE.zh_CN.md",
-        "docs/CHANGELOG.md",
+            "CLAUDE.md",
+            "docs/CHANGELOG.md",
         ".github/CONTRIBUTING.md",
         ".github/CODE_OF_CONDUCT.md",
         ".github/SECURITY.md",
@@ -127,44 +122,14 @@ def check_markdown_links(files: list[Path], errors: list[str]) -> None:
 
 
 def check_document_languages(files: list[Path], errors: list[str]) -> None:
-    """Require an English default and a linked Simplified Chinese peer."""
-    markdown = {path.resolve() for path in files if path.suffix.lower() == ".md"}
-
-    for path in sorted(markdown):
-        name = path.name
+    """Require English prose in every Markdown file (English-only edition)."""
+    for path in sorted(path for path in files if path.suffix.lower() == ".md"):
         text = path.read_text(encoding="utf-8")
-        opening = "\n".join(text.splitlines()[:8])
-
-        if name.endswith(".zh_CN.md"):
-            default_name = f"{name[:-len('.zh_CN.md')]}.md"
-            default_path = path.with_name(default_name).resolve()
-            if default_path not in markdown:
-                errors.append(
-                    f"{path.relative_to(ROOT)}: missing English default {default_name}"
-                )
-            elif default_name not in opening:
-                errors.append(
-                    f"{path.relative_to(ROOT)}: missing top language link to {default_name}"
-                )
-            continue
-
-        chinese_name = f"{path.stem}.zh_CN.md"
-        chinese_path = path.with_name(chinese_name).resolve()
-        if chinese_path not in markdown:
-            errors.append(
-                f"{path.relative_to(ROOT)}: missing Simplified Chinese peer {chinese_name}"
-            )
-        elif chinese_name not in opening:
-            errors.append(
-                f"{path.relative_to(ROOT)}: missing top language link to {chinese_name}"
-            )
-
-        english_prose = text.replace("简体中文", "")
-        match = CJK_RE.search(english_prose)
+        match = CJK_RE.search(text)
         if match:
-            line = english_prose.count("\n", 0, match.start()) + 1
+            line = text.count("\n", 0, match.start()) + 1
             errors.append(
-                f"{path.relative_to(ROOT)}:{line}: default Markdown must use English prose"
+                f"{path.relative_to(ROOT)}:{line}: Markdown must use English prose"
             )
 
 

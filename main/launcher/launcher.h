@@ -8,19 +8,19 @@
 extern "C" {
 #endif
 
-// 初始化 Launcher UI 资源
+// Initialize Launcher UI resources
 void launcher_ui_init(void);
 
-// 显示 Launcher 主界面（隐藏子应用界面）
+// Show the Launcher main screen (hide sub-app screens)
 void launcher_ui_show(void);
 
-// 隐藏 Launcher 主界面（进入子应用前调用）
+// Hide the Launcher main screen (call before entering a sub-app)
 void launcher_ui_hide(void);
 
-// Launcher 界面按键处理（UP/DOWN 翻卡片，OK 进入）
+// Launcher key handling (UP/DOWN flip cards, OK enters)
 void launcher_ui_on_key(uint8_t btn, app_btn_event_t event);
 
-// 更新状态栏信息（电池、时间）
+// Update status bar info (battery, time)
 void launcher_ui_update_status(void);
 
 #ifdef __cplusplus

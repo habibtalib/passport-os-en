@@ -1,4 +1,4 @@
-// main/app_events.c —— 应用事件队列实现。
+// main/app_events.c -- application event queue implementation.
 #include "app_events.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -8,12 +8,12 @@ static const char *TAG = "app_evt";
 
 #define APP_EVENT_QUEUE_DEPTH 8
 
-// 静态队列:8×240B ≈ 1.9KB 静态分配,消除启动堆峰值与创建失败分支(M2)。
-// 深度 16→8(性能轮,省 1856B):消费 ~µs/条,积压仅发生在 app_task 长动作
-// 窗口(voice.end drain ≤500ms / cancel ≤200ms),与高突发源(转写/CTRL 行)
-// 时间正交;满即丢+日志兜底不变,关键收束事件走 post_important 阻塞投递
-// 不丢;被丢的最坏是 display-only 转写行(逐行覆盖自愈,日志可观测)。
-// 注:TIME_SET 引入 int64 后结构 240B(8 深 = 1920B),上述分析不变(长度无关)。
+// Static queue: 8x240B ~ 1.9KB static allocation, removing the startup heap peak and the creation-failure branch (M2).
+// Depth 16->8 (performance round, saves 1856B): consuming takes ~us per item, backlog only occurs during app_task's long-action
+// windows (voice.end drain <=500ms / cancel <=200ms), which are orthogonal in time to the high-burst sources (transcript/CTRL lines);
+// drop-when-full + log stays as the safety net, and critical wrap-up events use blocking post_important delivery
+// and are not lost; the worst case is a dropped display-only transcript line (overwritten line by line, self-healing, observable in logs).
+// Note: after TIME_SET introduced int64 the struct is 240B (depth 8 = 1920B); the analysis above is unchanged (independent of length).
 static StaticQueue_t s_queue_struct;
 static uint8_t s_queue_storage[APP_EVENT_QUEUE_DEPTH * sizeof(app_event_t)];
 static QueueHandle_t s_queue;
@@ -21,8 +21,8 @@ static QueueHandle_t s_queue;
 esp_err_t app_events_init(void) {
     s_queue = xQueueCreateStatic(APP_EVENT_QUEUE_DEPTH, sizeof(app_event_t),
                                  s_queue_storage, &s_queue_struct);
-    if (!s_queue) {   // 静态创建仅在存储对齐异常时失败,防御保留
-        ESP_LOGE(TAG, "事件队列创建失败");
+    if (!s_queue) {   // static creation only fails on abnormal storage alignment, defensive check kept
+        ESP_LOGE(TAG, "event queue creation failed");
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -31,14 +31,14 @@ esp_err_t app_events_init(void) {
 void app_event_post(const app_event_t *ev) {
     if (!s_queue || !ev) return;
     if (xQueueSend(s_queue, ev, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "事件队列满,丢弃 type=%d", (int)ev->type);
+        ESP_LOGW(TAG, "event queue full, dropping type=%d", (int)ev->type);
     }
 }
 
 esp_err_t app_event_post_important(const app_event_t *ev, uint32_t timeout_ms) {
     if (!s_queue || !ev) return ESP_ERR_INVALID_STATE;
     if (xQueueSend(s_queue, ev, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
-        ESP_LOGW(TAG, "重要事件投递超时(%u ms),type=%d",
+        ESP_LOGW(TAG, "important event post timed out (%u ms), type=%d",
                  (unsigned)timeout_ms, (int)ev->type);
         return ESP_ERR_TIMEOUT;
     }

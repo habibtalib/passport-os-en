@@ -39,7 +39,7 @@ int main(){
     mock_allow_wake=true;mock_awake=false;pomodoro_service_tick();
     assert(!s_clock.notice_pending&&mock_objects==1&&mock_timers==0&&mock_wakes==1&&mock_awake);
     assert(mock_foreground==APP_ID_XIAOZHI);
-    assert(mock_top.children[0]->text=="番茄钟 · 专注完成");
+    assert(mock_top.children[0]->text=="Pomodoro · Focus done");
     for(int i=0;i<20;++i)pomodoro_service_tick();assert(mock_objects==1&&mock_wakes==1);
     mock_now+=10000000;pomodoro_service_tick();assert(mock_objects==0&&mock_top.children.empty());
     assert(s_clock.sound_pending && !sound_notices);

@@ -5,8 +5,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / 'main/apps/home/app_home.cc').read_text()
-read = source[source.index('esp_err_t read_portrait'):source.index('// 显示用 A8')]
-apply = source[source.index('void apply_avatar'):source.index('// ---- 天气像素图标:')]
+read = source[source.index('esp_err_t read_portrait'):source.index('// Display uses A8')]
+apply = source[source.index('void apply_avatar'):source.index('// ---- Pixel weather icons: WMO')]
 cleanup = source[source.index('    if (s_portrait_pixels != nullptr)', source.index('void home_stop()')):
                  source.index('    ESP_LOGI(kTag, "Home app stopped', source.index('void home_stop()'))]
 prelude = r'''

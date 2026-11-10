@@ -1,7 +1,3 @@
-<p align="right">
-  <a href="SECURITY.zh_CN.md">简体中文</a> · <strong>English</strong>
-</p>
-
 # Security Policy
 
 Do not disclose unpatched security vulnerabilities, credentials, tokens, or

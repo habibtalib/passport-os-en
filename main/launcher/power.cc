@@ -109,7 +109,7 @@ bool power_battery_tick(void) {
             // Session-only dimming; the saved brightness returns after a charge and reboot.
             bsp_display_set_master_brightness(
                 std::min(bsp_display_get_master_brightness(), kLowBatteryBrightness));
-            show_notice("电量低于 10%\n已调暗屏幕，请尽快充电", 4000);
+            show_notice("Battery below 10%\nScreen dimmed, charge soon", 4000);
             return false;
         }
         case BATTERY_SHUTDOWN:
@@ -128,11 +128,11 @@ void power_hold(uint8_t stage) {
             break;
         case 1:
             s_hold_hint = true;
-            show_notice("继续按住关机\n松开取消", 0);
+            show_notice("Keep holding to power off\nRelease to cancel", 0);
             break;
         case 2:
-            power_off("已关机\n按住上键 1 秒开机");
+            power_off("Powered off\nHold Up 1s to power on");
         default:
-            power_off("电量耗尽，已关机\n充电后按住上键开机");
+            power_off("Battery empty, powered off\nCharge, then hold Up to power on");
     }
 }

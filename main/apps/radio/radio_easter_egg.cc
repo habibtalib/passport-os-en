@@ -293,7 +293,7 @@ esp_audio_simple_dec_handle_t open_mp3_decoder() {
 }
 
 void show_error_then_return(bool resume_radio) {
-    radio_ui_show_easter_egg("彩蛋未安装");
+    radio_ui_show_easter_egg("Easter egg not installed");
     for (int i = 0; i < 15 && !s_stop_requested.load(); ++i) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -307,7 +307,7 @@ void show_error_then_return(bool resume_radio) {
 
 void easter_task(void *) {
     s_easter_task = xTaskGetCurrentTaskHandle();
-    radio_ui_show_easter_egg("正在加载彩蛋");
+    radio_ui_show_easter_egg("Loading easter egg");
 
     ResourceHeader header = {};
     if (!validate_header(&header)) {
@@ -418,7 +418,7 @@ void easter_task(void *) {
 
     const bool failed = s_video_failed.load() || !format_ready || !video_started;
     if (failed) {
-        radio_ui_show_easter_egg("彩蛋未安装");
+        radio_ui_show_easter_egg("Easter egg not installed");
         vTaskDelay(pdMS_TO_TICKS(1200));
     }
     radio_ui_finish_easter_egg();

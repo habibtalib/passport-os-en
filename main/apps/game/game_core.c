@@ -2,51 +2,51 @@
 
 #include <stddef.h>
 
-// 物理常量(Q4/帧,30fps)。换算:16 Q4 = 1px/帧 = 30px/s。
-// 垂直用"目标速度"模型:声音档位 0..255 线性映射 缓降↔爬升,vy 向目标平滑
-// 收敛且被目标值钳住 —— 初版是重力/推力对抗加速,说话冲上天、安静瞬间坠地,
-// 难度高到过不了第一关(用户实测)。
+// Physics constants (Q4/frame, 30fps). Conversion: 16 Q4 = 1px/frame = 30px/s.
+// Vertical motion uses a "target velocity" model: the sound level 0..255 maps linearly to slow sink <-> climb; vy eases
+// toward the target and is clamped by it -- the first version used gravity/thrust acceleration, so talking shot the dog
+// skyward and silence dropped it instantly, too hard to pass the first level (user-tested).
 //
-// 2026-09-13 优化:常量搬进 game_core.h 的"难度曲线调参区",本文件只保留
-// 与难度无关的纯物理量(运动手感 + 天花板处理)。数值与优化前完全一致。
-#define SINK4 37       /* 静音目标速度:匀速缓降 ≈69px/s,半屏约 2s,且保证
-                          最快管道速度下也够得着向下 56px 的下一个缺口 */
-#define CLIMB4 (-58)   /* 满声目标速度:匀速爬升 ≈109px/s,再大声也就这么快 */
-#define FLAP4 (-50)    /* OK 拍翅:轻点一下 ≈ -94px/s */
+// 2026-09-13 optimization: constants moved to the "difficulty curve tuning area" in game_core.h; this file keeps only
+// the difficulty-independent pure physics (motion feel + ceiling handling). Values are identical to before.
+#define SINK4 37       /* target velocity when silent: constant slow sink ~69px/s, half a screen in ~2s, and guaranteed to
+                                                    reach the next gap 56px lower at the fastest pipe speed */
+#define CLIMB4 (-58)   /* target velocity at full volume: constant climb ~109px/s, no faster however loud */
+#define FLAP4 (-50)    /* OK flap: one light tap ~ -94px/s */
 
-/* vy 向目标速度收敛的分母:4 = 每帧收敛 1/4 ≈ 130ms 时间常数,跟手但不跳变。
-   调小 = 更跟手但更"神经质";调大 = 更绵软。 */
+/* Divisor for vy converging to the target velocity: 4 = converges 1/4 per frame, ~130ms time constant, responsive but no jumps.
+      Lower = more responsive but more "twitchy"; higher = mushier. */
 #define VY_EASE_DIV 4
 
-/* 天花板软处理:距顶 <CEIL_HARD 强制低头,CEIL_HARD~CEIL_SOFT 线性收油门。
-   悬停带保持在最浅缺口(gap_y≥50)以下,否则鸟贴着天花板蹭,
-   擦到浅缺口的管道边就是"看着没碰却死了"。 */
+/* Soft ceiling: within CEIL_HARD of the top force the head down; CEIL_HARD..CEIL_SOFT linearly ease off the throttle.
+      The hover band stays below the shallowest gap (gap_y>=50), otherwise the character rubs the ceiling and
+      clips the edge of a shallow-gap pipe -- "looks untouched yet dead". */
 #define CEIL_HARD 25
 #define CEIL_SOFT 50
 
-/* 缺口随机带的上下留白(px):保证缺口不会贴着顶栏或草地生成。 */
+/* Top/bottom margin of the random gap band (px): keeps gaps from spawning against the top bar or the grass. */
 #define BAND_MARGIN 24
 
 static struct {
     gc_phase_t phase;
-    int32_t y;       /* 鸟顶边,Q4 */
-    int32_t vy;      /* Q4/帧 */
-    int32_t thrust;  /* 0..255 声音档位 */
+    int32_t y;       /* top edge of the character, Q4 */
+    int32_t vy;      /* Q4/frame */
+    int32_t thrust;  /* 0..255 sound level */
     bool flap_pending;
-    int32_t last_gap_y; /* 上一根缺口顶(px):可达性约束的基准 */
-    gc_death_info_t death; /* 死因快照,给上层日志用 */
+    int32_t last_gap_y; /* top of the previous gap (px): baseline for the reachability constraint */
+    gc_death_info_t death; /* death-cause snapshot, for upper-layer logs */
     gc_pipe_t pipes[GC_PIPES];
     int score;
     uint32_t rng;
 } s;
 
-/* 当前缺口高度:随得分收窄,到 GC_GAP_MIN 封底。 */
+/* Current gap height: narrows with score, floored at GC_GAP_MIN. */
 static int32_t gap_h_now(void) {
     int32_t gap = GC_GAP_START - s.score * GC_GAP_SHRINK;
     return gap < GC_GAP_MIN ? GC_GAP_MIN : gap;
 }
 
-/* 当前管道速度:随得分略提速,到 GC_SPEED_BONUS_MAX 分封顶。 */
+/* Current pipe speed: speeds up slightly with score, capped at GC_SPEED_BONUS_MAX points. */
 static int32_t speed_now(void) {
     const int32_t bonus =
         s.score > GC_SPEED_BONUS_MAX ? GC_SPEED_BONUS_MAX : s.score;
@@ -54,7 +54,7 @@ static int32_t speed_now(void) {
 }
 
 static uint32_t next_rand(void) {
-    /* LCG:确定性、无 libc 依赖 */
+    /* LCG: deterministic, no libc dependency */
     s.rng = s.rng * 1664525u + 1013904223u;
     return s.rng >> 8;
 }
@@ -64,8 +64,8 @@ static void recycle_pipe(gc_pipe_t *p, int32_t x_q4) {
     const int32_t band_top = GC_TOP + BAND_MARGIN;
     const int32_t span = (GC_GROUND_Y - GC_TOP) - gap - (BAND_MARGIN * 2);
     int32_t cy = band_top + (int32_t)(next_rand() % (uint32_t)span);
-    /* 可达性约束:缺口顶相对上一根最多移动 GC_GAP_STEP_MAX,且夹回合法区间。
-       否则随机落差超过狗的爬升/缓降能力,必撞,"什么都没碰就输了"。 */
+    /* Reachability constraint: the gap top moves at most GC_GAP_STEP_MAX from the previous one, clamped back into the legal range.
+          Otherwise a random jump beyond the dog's climb/sink ability means a certain crash, "lost without touching anything". */
     int32_t lo = s.last_gap_y - GC_GAP_STEP_MAX;
     int32_t hi = s.last_gap_y + GC_GAP_STEP_MAX;
     if (lo < band_top) lo = band_top;
@@ -85,9 +85,9 @@ void gc_reset(void) {
     s.vy = 0;
     s.thrust = 0;
     s.flap_pending = false;
-    s.last_gap_y = GC_TOP + 60; /* 缺口链基准:合法带中部,首根管道就近出发 */
-    /* 死因快照整体清零 —— 原来只清 reason,重开后 bird_y/pipe_x 还留着上一局
-       的坐标,一旦新一局首帧就死会打出误导性的日志。 */
+    s.last_gap_y = GC_TOP + 60; /* gap-chain baseline: middle of the legal band, so the first pipe starts nearby */
+    /* Clear the whole death snapshot -- it used to clear only reason, so after a restart bird_y/pipe_x still held
+          the previous round's coordinates, and dying on the first frame of a new round would log misleading data. */
     s.death.reason = 0;
     s.death.bird_y = 0;
     s.death.pipe_x = 0;
@@ -99,7 +99,7 @@ void gc_reset(void) {
         p->x = (240 + 60 + i * GC_SPACING) << 4;
         p->gap_h = GC_GAP_START;
         p->gap_y = (GC_TOP + 40) << 4;
-        p->scored = true; /* READY 态不画不判 */
+        p->scored = true; /* READY: neither drawn nor judged */
     }
 }
 
@@ -126,17 +126,17 @@ static bool hit(int32_t ax, int32_t ay, int32_t aw, int32_t ah,
 void gc_step(void) {
     if (s.phase != GC_PLAYING) return;
 
-    /* 垂直运动:声音档位线性映射 缓降↔爬升 的目标速度,vy 每帧向目标收敛
-       1/4(~130ms 时间常数,跟手但不跳变)。速度上限就是目标端点,
-       说话再响也只是匀速爬升,安静时也只是匀速缓降。 */
+    /* Vertical motion: the sound level maps linearly to a slow sink <-> climb target velocity, and vy converges to it by
+          1/4 each frame (~130ms time constant, responsive but no jumps). The speed limit is the target endpoints:
+          however loud the speech, it is only a constant climb; when quiet, only a constant slow sink. */
     int32_t target;
     if (s.flap_pending) {
         s.flap_pending = false;
-        target = FLAP4; /* 拍翅:一次性轻点,随后仍向声音目标收敛 */
+        target = FLAP4; /* flap: a one-off light tap, then it still converges to the sound target */
     } else {
         target = SINK4 + (int32_t)s.thrust * (CLIMB4 - SINK4) / 255;
-        /* 贴顶处理:距顶 CEIL_HARD 内强制低头,CEIL_HARD~CEIL_SOFT 爬升随接近
-           顶线性收油门。 */
+        /* Ceiling handling: within CEIL_HARD of the top force the head down; CEIL_HARD..CEIL_SOFT the climb eases off
+              linearly the closer to the top line. */
         int32_t headroom = (s.y >> 4) - GC_TOP;
         if (headroom < 0) headroom = 0;
         if (headroom < CEIL_HARD) {
@@ -149,8 +149,8 @@ void gc_step(void) {
     s.vy += (target - s.vy) / VY_EASE_DIV;
     s.y += s.vy;
 
-    /* 管道推进 + 复用。speed_now() 本就是 Q4/帧,不能再 <<4 ——
-       多移 4 位曾让管道以 1860px/s 闪现,开局一秒内必死。 */
+    /* Pipe advance + reuse. speed_now() is already Q4/frame, so do not <<4 again --
+          the extra 4 bits once made pipes flash by at 1860px/s, a certain death within the first second. */
     const int32_t speed = speed_now();
     int32_t rightmost = 0;
     for (int i = 0; i < GC_PIPES; ++i) {
@@ -167,8 +167,8 @@ void gc_step(void) {
         }
     }
 
-    /* 碰撞:鸟盒内缩 GC_HIT_INSET px(视觉宽容)。落地即死;撞顶只贴顶滑行不判
-       死 —— 否则"喊得越响死得越快",与声音越大上升越猛的直觉相反。 */
+    /* Collision: the character box is inset by GC_HIT_INSET px (visual leniency). Touching the ground kills; hitting the ceiling only slides along it
+          without killing -- otherwise "the louder you shout the faster you die", contrary to the intuition that louder = climb harder. */
     const int32_t bx = GC_BIRD_X + GC_HIT_INSET;
     const int32_t by = (s.y >> 4) + GC_HIT_INSET;
     const int32_t bw = GC_BIRD_W - (GC_HIT_INSET * 2);
@@ -187,8 +187,8 @@ void gc_step(void) {
         const gc_pipe_t *p = &s.pipes[i];
         const int32_t px = p->x >> 4;
         const int32_t gap_top = p->gap_y >> 4;
-        /* 上半截高度必须用 gap_top-GC_TOP:直接拿 gap_y 当高度会让碰撞矩形
-           比可见管道长出 GC_TOP=26px 隐形区,鸟没碰到柱子也判死(实测) */
+        /* The upper pipe height must use gap_top-GC_TOP: using gap_y directly as the height makes the collision rect
+              GC_TOP=26px longer than the visible pipe (an invisible zone), so the character is judged dead without touching a pillar (measured) */
         const bool hit_top =
             hit(bx, by, bw, bh, px, GC_TOP, GC_PIPE_W, gap_top - GC_TOP);
         const bool hit_bot =

@@ -5,19 +5,19 @@ extern "C" {
 #endif
 
 /**
- * 真机 UI 截图（调试用途）。
+ * On-device UI screenshot (for debugging).
  *
- * C3 内部堆放不下 240x320 的 RGB565 整帧（153600 字节），所以这里**按横带渲染**：
- * 直接操纵 LVGL 的 layer（与 lv_snapshot 同一套机制），把 layer 的 buf_area /
- * _clip_area 限制在一条 240 x N 的横带上，让软件渲染器只画这一带，画完立刻把
- * 像素以十六进制文本从 console 吐出去，再渲染下一条。
- * 峰值内存只有 240 * N * 2 字节（N=32 时 15KB），而不是 150KB。
+ * The C3 internal heap cannot hold a full 240x320 RGB565 frame (153600 bytes), so this **renders in horizontal bands**:
+ * it manipulates the LVGL layer directly (same mechanism as lv_snapshot), restricting the layer buf_area /
+ * _clip_area to a 240 x N band so the software renderer draws only that band, then immediately dumps the
+ * pixels as hex text from the console, then renders the next band.
+ * Peak memory is only 240 * N * 2 bytes (15KB at N=32), not 150KB.
  *
- * 用十六进制（而不是裸二进制）是因为截图过程中 Wi-Fi / 电池等其他任务仍会打日志，
- * 裸二进制流会被冲断无法恢复；每行带 `H:<行号>:` 前缀，主机端只认这个前缀，
- * 混入的日志行自然被丢掉，缺行还能检测出来。
+ * Hex (not raw binary) is used because during a screenshot other tasks (Wi-Fi / battery etc.) still log,
+ * and a raw binary stream would be interrupted and unrecoverable; each line carries an `H:<row>:` prefix, the host only accepts this prefix,
+ * so interleaved log lines are naturally dropped and missing rows can be detected.
  *
- * 调用方必须**已经持有** bsp_lvgl_lock（lv_obj_redraw 需要在 LVGL 上下文里跑）。
+ * The caller must **already hold** bsp_lvgl_lock (lv_obj_redraw needs to run in the LVGL context).
  */
 void ui_capture_dump_hex(void);
 

@@ -1,16 +1,16 @@
 # Passport OS 0.2.0-rc.56
 
-本地私有候选，未发布、未烧录。
+Local private candidate; not published, not flashed.
 
-## Muse 网络配置
+## Muse network configuration
 
-- 移除 Muse 的“出门用手机热点”配置项、NVS 路由规则和自动切换逻辑。
-- Muse 继续支持直连，以及手动填写电脑局域网代理 IP 和端口。
-- 网络诊断页只显示直连或电脑代理，首次配网使用的设备热点仍保留。
+- Removed the Muse "use phone hotspot when out" setting, its NVS routing rules and the automatic switching logic.
+- Muse still supports a direct connection, and a manually entered computer LAN proxy IP and port.
+- The network diagnostics page shows only direct or computer proxy. The device hotspot used for first-time Wi-Fi setup is unchanged.
 
-## 验证边界
+## Verification scope
 
-- ESP-IDF 5.5.3 / ESP32-C3 public release 构建通过。
-- 固件布局、应用分区余量、SRAM 预算和 public defaults 校验通过。
-- 手机设置页 Muse 流程主机回归通过。
-- 本轮未烧录硬件，未做实机网络验收。
+- ESP-IDF 5.5.3 / ESP32-C3 public release build passes.
+- Firmware layout, app partition headroom, SRAM budget and public defaults checks pass.
+- Host regression for the Muse flow on the phone setup page passes.
+- This round was not flashed to hardware and had no on-device network acceptance.

@@ -73,10 +73,10 @@ static StaticTask_t s_system_tasks[4];
 static StaticQueue_t s_key_queue_control;
 static uint8_t s_key_queue_storage[16 * sizeof(KeyMessage)];
 
-// 2026-09-13 修复(D5):原来 11 处 xQueueSend 全都不看返回值。队列满时
-// (消费端 input_task 卡在 LVGL 锁或应用切换上)按键被静默丢弃,表现为
-// "按了没反应"却查不到任何线索。集中到这一个函数:失败时限频告警,
-// 一眼能看出是按键侧丢还是消费端卡住。
+// 2026-09-13 fix (D5): previously all 11 xQueueSend calls ignored the return value. When the queue was full
+// (consumer input_task stuck on the LVGL lock or an app switch) key presses were silently dropped, showing up as
+// "pressed but nothing happened" with no trace. Centralized in this one function: on failure it logs a rate-limited warning,
+// so you can tell at a glance whether the key side dropped it or the consumer is stuck.
 static void key_post(const KeyMessage &msg) {
     if (xQueueSend(s_key_queue, &msg, 0) == pdTRUE) return;
     static TickType_t s_last_warn = 0;
@@ -87,7 +87,7 @@ static void key_post(const KeyMessage &msg) {
     }
 }
 
-// 串口调试命令走同一条队列;这里允许短暂等待,避免手敲命令被瞬间突发挤掉。
+// Serial debug commands go through the same queue; a short wait is allowed here so hand-typed commands are not dropped by an instant burst.
 static void key_post_wait(const KeyMessage &msg) {
     if (xQueueSend(s_key_queue, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
         ESP_LOGW(TAG, "key queue busy: dropped btn=%u evt=%u", msg.button, (unsigned)msg.event);
@@ -134,7 +134,7 @@ static void button_task(void *arg) {
             stable = candidate;
             ESP_LOGI(TAG, "Key Transition: stable=%d (prev=%d), mv=%u", stable, previous, last_mv);
             if (stable >= 0) {
-                // 按下瞬间 (PRESS)
+                // Press instant (PRESS)
                 pressed_at = xTaskGetTickCount();
                 long_sent = false;
                 KeyMessage msg = {
@@ -144,7 +144,7 @@ static void button_task(void *arg) {
                 };
                 key_post(msg);
             } else if (previous >= 0) {
-                // 松开瞬间
+                // Release instant
                 if (!long_sent) {
                     KeyMessage msg_click = {
                         .button = static_cast<uint8_t>(previous),
@@ -182,7 +182,7 @@ static void button_task(void *arg) {
             }
         }
 
-        // 长按判定 (800ms)
+        // Long-press detection (800ms)
         if (stable >= 0 && !long_sent &&
             (xTaskGetTickCount() - pressed_at >= pdMS_TO_TICKS(800))) {
             KeyMessage msg_long = {
@@ -252,8 +252,8 @@ static void handle_serial_command(int c) {
         KeyMessage msg = {.button = BSP_BTN_OK, .event = BTN_EVT_LONG, .mv = 2070};
         app_registry_dispatch_key(msg.button, msg.event, msg.mv);
     } else if (c == 'k' || c == 'K') {
-        // 调试用:长按下键。首页的上传模式(手机配网/传头像)绑在这个手势上,
-        // 没有串口映射就无法脱离真机按键验证。
+        // Debug: long-press Down. Home upload mode (phone Wi-Fi setup / avatar upload) is bound to this gesture,
+        // and without a serial mapping it cannot be verified off the physical device buttons.
         ESP_LOGI(TAG, "[SerialCmd] LONG DOWN (-) button triggered");
         KeyMessage msg = {.button = BSP_BTN_DOWN, .event = BTN_EVT_LONG, .mv = 1060};
         app_registry_dispatch_key(msg.button, msg.event, msg.mv);
@@ -265,10 +265,10 @@ static void handle_serial_command(int c) {
             .mv = static_cast<uint16_t>(c == '[' ? 15 : 2900)};
         app_registry_dispatch_key(msg.button, msg.event, msg.mv);
     } else if (c == 'p' || c == 'P') {
-        // 真机 UI 截图：按横带渲染当前活动屏，把 RGB565 像素以十六进制从
-        // console 吐出（主机端 _diag/capture_ui.py 收流并还原成 PNG）。
-        // 必须持 LVGL 锁调用（lv_obj_redraw 要在 LVGL 上下文里跑），
-        // 整个过程 ~1s，期间其它任务的 LVGL 操作会排队。
+        // On-device UI screenshot: render the current active screen in horizontal bands, dumping RGB565 pixels as hex from
+        // the console (host-side _diag/capture_ui.py receives the stream and restores a PNG).
+        // Must be called with the LVGL lock held (lv_obj_redraw has to run in the LVGL context);
+        // the whole process takes ~1s, during which LVGL operations from other tasks queue up.
         ESP_LOGI(TAG, "[SerialCmd] screenshot requested");
         if (bsp_lvgl_lock(pdMS_TO_TICKS(2000))) {
             ui_capture_dump_hex();
@@ -295,7 +295,7 @@ static void handle_serial_command(int c) {
                 (unsigned)esp_get_minimum_free_heap_size(),
                 heap_caps_check_integrity_all(true));
     } else if (c == 'h') {
-        // 诊断版专用:逐块打印内部堆及其所属任务,用于比对应用退出前后的残留。
+        // Diagnostic build only: print internal heap block by block with owning task, to compare leftovers before/after an app exits.
         bsp_memory_map();
     } else if (c == 'j') {
         app_registry_switch_to(APP_ID_SOUND_JUMP);
@@ -329,13 +329,13 @@ static void serial_cmd_task(void *arg) {
 }
 
 extern "C" void app_main(void) {
-    power_boot_check();    // 注:上电瞬间的白屏由 bootloader_components/bl_early 在二级 bootloader 里
+    power_boot_check();    // Note: the white screen at power-on is handled by bootloader_components/bl_early in the second-stage bootloader
     bsp_memory_init();
-    // 就把 GPIO21 拉低解决(已实测 out=0/oe=1 一路保持到 app_main)。
-    // 详见该目录下的注释。
-    // 最早时刻把背光脚拉成确定低电平:上电到 LEDC 初始化之间该脚悬空,
-    // 背光电路会被"点着",而面板此时是未写入的白屏 —— 这就是开机白闪。
-    // (第二级 bootloader 阶段仍无法覆盖,那一小段由硬件上拉/下拉决定。)
+    // by pulling GPIO21 low (measured out=0/oe=1 held all the way to app_main).
+    // See the comments in that directory for details.
+    // At the earliest moment, drive the backlight pin to a definite low level: between power-on and LEDC init the pin floats,
+    // the backlight circuit gets "lit", while the panel is still an unwritten white screen - that is the boot white flash.
+    // (The second-stage bootloader phase still cannot be covered; that short span is decided by hardware pull-up/pull-down.)
     {
         gpio_config_t bl = {
             .pin_bit_mask = 1ULL << BSP_LCD_BL,
@@ -356,7 +356,7 @@ extern "C" void app_main(void) {
     ESP_ERROR_CHECK(esp_pm_configure(&pm_config));
     ESP_LOGI(TAG, "Power management: DFS 40-160MHz, automatic light sleep enabled");
 
-    // 1. NVS 初始化
+    // 1. NVS init
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -364,14 +364,14 @@ extern "C" void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // 头像/名片分区在后台挂载;残留其他固件时在此格式化(十余秒),
-    // 不让手机上传请求承担这段耗时。堆此时最完整,SPIFFS 缓冲也放在低地址。
+    // The avatar/card partition mounts in the background; if other firmware left it, it is formatted here (ten-odd seconds),
+    // so the phone upload request does not bear that cost. The heap is most intact now, and the SPIFFS buffer also sits at low addresses.
     xTaskCreate([](void *) {
         home_profile_storage_prepare();
         vTaskDelete(nullptr);
     }, "storage_prep", 3584, nullptr, tskIDLE_PRIORITY + 1, nullptr);
 
-    // 2. 硬件总线与外设初始化
+    // 2. Hardware bus and peripheral init
     ESP_ERROR_CHECK(bsp_i2c_init());
     ESP_ERROR_CHECK(bsp_display_init());
     if (bsp_lvgl_init() == NULL) {
@@ -379,31 +379,31 @@ extern "C" void app_main(void) {
         return;
     }
     settings_bootstrap();
-    // 背光不在这里点亮:此时面板 GRAM 尚未写入任何帧,亮背光会闪白屏。
-    // 背光由 boot_splash 在首帧渲染完成后渐亮(见 boot_splash.c)。
+    // Backlight is not turned on here: the panel GRAM has had no frame written yet, and lighting it would flash white.
+    // The backlight is faded up by boot_splash after the first frame is rendered (see boot_splash.c).
 
     bsp_battery_init();
-    // 仅初始化 ADC 采样硬件，不启动有死锁风险的 timer 回调
+    // Only init the ADC sampling hardware, do not start timer callbacks that risk deadlock
     ESP_ERROR_CHECK(bsp_button_init(nullptr, nullptr));
 
-    // 3. 初始化 Launcher 与应用注册表 (仅载入启动器，不预加载子 App)
+    // 3. Init Launcher and app registry (load the launcher only, do not preload sub-apps)
     app_registry_init();
-    // 磷光开机动画(~0.9s,与开机音同步);不再提前初始化/加载 Launcher ——
-    // 旧路径会先闪一两帧应用页再跳首页。抽屉首次进入时才会自建界面。
+    // Phosphor boot animation (~0.9s, synced with the boot chime); no longer init/load the Launcher early -
+    // the old path flashed one or two frames of an app page before jumping to Home. The drawer builds its UI on first entry.
     boot_splash_run();
 
 
-    // 4. 初始化全局 Wi-Fi 管理器；若已存有配置则在后台自动拉起 Station 连接
+    // 4. Init the global Wi-Fi manager; if a config is saved, bring up the Station connection in the background
     WifiManagerConfig wifi_cfg = {};
     wifi_cfg.ssid_prefix = "Passport-WiFi";
     wifi_cfg.language = "zh-CN";
     WifiManager::GetInstance().Initialize(wifi_cfg);
-    // 待机省电默认档:MAX modem sleep(首页/桌面/设置等非流媒体前台)。
-    // 进 radio/voice/xiaozhi 时由 app_registry 切回 BALANCED,上传模式由首页恢复。
+    // Default standby power-saving: MAX modem sleep (non-streaming foreground such as Home/desktop/Settings).
+    // Entering radio/voice/xiaozhi switches back to BALANCED via app_registry; upload mode is restored by Home.
     WifiManager::GetInstance().SetPowerSaveLevel(WifiPowerSaveLevel::LOW_POWER);
 
-    // 为整理堆而软重启时(见 app_registry 的 clean launch),直接进入目标应用,
-    // 不先构建首页,也不播开机音:否则又会在新堆上留下首页与音频的碎片。
+    // On a soft reboot to tidy the heap (see app_registry clean launch), go straight into the target app,
+    // without building Home first or playing the boot chime: otherwise Home and audio would again leave fragments on the new heap.
     const passport_app_id_t clean_target = app_registry_take_clean_launch();
     timers_restore_after_restart();
     bool chime = true;
@@ -426,11 +426,11 @@ extern "C" void app_main(void) {
     // its I2S handles torn down by the chime's late cleanup.
     if (chime) boot_chime_start();
 
-    // 5. 创建按键事件队列与输入分发任务 (系统就绪后正式接收用户输入)
-    //    input_disp 保留 8192，串口命令也由它执行 app_registry_switch_to()；
-    //    应用启动里最深的是 Home 天气图标 JPEG 解码 —— LVGL TJPEG
-    //    decoder_info(文件源)在栈上放 4KB 工作缓冲(lv_tjpgd.c:110),
-    //    3584/4096 栈实测爆栈(Stack protection fault,2026-09-13)。
+    // 5. Create the key event queue and input dispatch task (accept user input once the system is ready)
+    //    input_disp keeps 8192; serial commands are also run by it via app_registry_switch_to();
+    //    the deepest app startup is the Home weather icon JPEG decode -
+    //    LVGL TJPEG decoder_info (file source) puts a 4KB work buffer on the stack (lv_tjpgd.c:110),
+    //    3584/4096 stacks overflowed in measurements (Stack protection fault, 2026-09-13).
     s_key_queue = xQueueCreateStatic(16, sizeof(KeyMessage), s_key_queue_storage, &s_key_queue_control);
     xTaskCreateStatic(button_task, "btn_poll", sizeof(s_button_stack), NULL, 6,
                       s_button_stack, &s_system_tasks[0]);
@@ -439,7 +439,7 @@ extern "C" void app_main(void) {
     xTaskCreateStatic(serial_cmd_task, "ser_cmd", sizeof(s_serial_stack), NULL, 4,
                       s_serial_stack, &s_system_tasks[2]);
 
-    // 6. 启动系统监控心跳任务 (状态栏与统一息屏管理)
+    // 6. Start the system monitor heartbeat task (status bar and unified screen-off management)
     xTaskCreateStatic(system_monitor_task, "sys_mon", sizeof(s_monitor_stack), NULL, 1,
                       s_monitor_stack, &s_system_tasks[3]);
 

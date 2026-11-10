@@ -1,228 +1,228 @@
-# AI语音 · Wi-Fi UDP 通道设计（2026-09-12）
+# AI Voice · Wi-Fi UDP channel design (2026-09-12)
 
-> 本文是**设备端与 companion 端共同遵守的契约**。改一侧必须同步另一侧。
+> This document is a **contract that both the device side and the companion side must follow**. A change on one side must be synchronized to the other.
 
-## 0. 一句话
+## 0. In one sentence
 
-把 AI语音 的上行通道从 BLE 换成 Wi-Fi UDP：设备与电脑在同一局域网，companion 每秒广播 beacon，
-设备听到后学到电脑 IP，之后音频与事件走 UDP 单播；**BLE 整层移除**。
+Replace the AI Voice uplink channel from BLE with Wi-Fi UDP: the device and the computer are on the same LAN, the companion broadcasts a beacon every second,
+the device learns the computer's IP after hearing it, and from then on audio and events go over UDP unicast; **the BLE layer is removed entirely**.
 
 ---
 
-## 1. 为什么换（BLE 的现状代价）
+## 1. Why switch (the current cost of BLE)
 
-| 代价 | 证据 |
+| Cost | Evidence |
 | --- | --- |
-| 进语音就杀 Wi-Fi，其他应用全断 | `app_voice.cc` `suspend_wifi_driver()` → `StopStation()` + `esp_wifi_deinit()` |
-| NimBLE controller 常驻 ~44.7KB，剩余最大连续块仅 ~7KB | `ble_audio.c` 原注释 |
-| 发送栈 4096→5120（+1KB）即 `ble_hs_start` 失败 → **重启循环** | 同上 |
-| 射频干扰造成幽灵按键 | `app_state.c` 为此堆了 5 组 mV 门禁 |
-| 代码体量 | `ble_audio.c` 747 行，占 voice 传输层近一半 |
+| Entering voice kills Wi-Fi, so all other apps are disconnected | `app_voice.cc` `suspend_wifi_driver()` → `StopStation()` + `esp_wifi_deinit()` |
+| The NimBLE controller stays resident at ~44.7KB, leaving a largest contiguous block of only ~7KB | Original comment in `ble_audio.c` |
+| Growing the send stack from 4096 to 5120 (+1KB) makes `ble_hs_start` fail → **reboot loop** | Same as above |
+| RF interference causes phantom key presses | `app_state.c` piled up 5 sets of mV gates for this |
+| Code size | `ble_audio.c` is 747 lines, nearly half of the voice transport layer |
 
-**历史事实**：本站点原本存在过 Wi-Fi 通道，用的是 **WebSocket + mDNS**（`ws_client.c` / `mdns_resolver.c` /
-`wifi_app.c`），已随重构整体移除，且 git 历史被 squash 过（只剩 1 个 commit），不可恢复。
-本次用 **UDP** 重建，理由：
+**Historical fact**: this site originally had a Wi-Fi channel, built on **WebSocket + mDNS** (`ws_client.c` / `mdns_resolver.c` /
+`wifi_app.c`); it was removed wholesale in a refactor, and the git history was squashed (only 1 commit remains), so it cannot be recovered.
+This time it is rebuilt with **UDP**, for these reasons:
 
-- 无需 HTTP Upgrade / mTLS 握手，设备端代码量约为 WS 的 1/3；
-- UDP 报文天然有边界 —— 一个数据报就是一个音频块，**不需要分片重组**；
-- ADPCM 块自带 predictor/index 头，**丢一块只损失 100ms 且不失步**，与 UDP 的丢包模型天然契合；
-  换成 PCM 反而会因为缺字节导致后续全部错位；
-- 端点已存在：首页头像上传早就跑在 Wi-Fi 上（真机 `http://192.168.5.4`），Wi-Fi 栈是已验证路径。
+- No HTTP Upgrade / mTLS handshake is needed, and the device-side code is about 1/3 the size of WS;
+- UDP datagrams have natural boundaries: one datagram is one audio block, so **no fragment reassembly is needed**;
+- An ADPCM block carries its own predictor/index header, so **losing a block costs only 100ms and does not lose sync**, which fits UDP's loss model naturally;
+  with PCM, a missing byte would instead misalign everything after it;
+- The endpoint already exists: the Home page avatar upload has long run over Wi-Fi (on the real device `http://192.168.5.4`), so the Wi-Fi stack is a verified path.
 
 ---
 
-## 2. 角色与端口
+## 2. Roles and ports
 
-| 端 | 角色 | 行为 |
+| Side | Role | Behavior |
 | --- | --- | --- |
-| companion（电脑） | 服务端 | `bind 0.0.0.0:33333`；每 **1000ms** 向 `255.255.255.255:33333` 广播 beacon |
-| 设备（ESP32-C3） | 客户端 | `bind 0.0.0.0:33333`（收 beacon）；学到电脑 IP 后向 `<pc_ip>:33333` 单播 |
+| companion (computer) | Server | `bind 0.0.0.0:33333`; every **1000ms** broadcasts a beacon to `255.255.255.255:33333` |
+| Device (ESP32-C3) | Client | `bind 0.0.0.0:33333` (receives the beacon); after learning the computer's IP, unicasts to `<pc_ip>:33333` |
 
-端口常量：`VOICE_UDP_PORT = 33333`（双向同端口）。
+Port constant: `VOICE_UDP_PORT = 33333` (same port in both directions).
 
-- 设备**不广播**：它只需要听。
-- companion 由 `recvfrom` 的来源地址学出设备地址，因此不需要设备做任何宣告。
-- companion 收到 `type==0x03`（beacon）一律忽略 —— 那是自己广播出去的回环，不是设备发来的。
+- The device **does not broadcast**: it only needs to listen.
+- The companion learns the device address from the source address of `recvfrom`, so the device does not need to announce anything.
+- The companion always ignores `type==0x03` (beacon): that is the loopback of its own broadcast, not something sent by the device.
 
 ---
 
-## 3. 报文格式
+## 3. Packet format
 
 ```
-每个 UDP 数据报 = [1B type][payload]
+Each UDP datagram = [1B type][payload]
 ```
 
-| type | 方向 | payload | 总长（含 1B type） |
+| type | Direction | payload | Total length (including 1B type) |
 | --- | --- | --- | --- |
-| `0x01` AUDIO | 设备→电脑 | `[seq][0x80]` + 804B IMA ADPCM block | 807B |
-| `0x02` EVENT | 双向 | UTF-8 JSON 行（**含结尾 `\n`**） | ≤ 513B |
-| `0x03` BEACON | 电脑→设备 | UTF-8 JSON `{"v":1,"role":"pc","port":33333}` | ~40B |
-| `0x04` PING | 设备→电脑 | 空 | 1B |
+| `0x01` AUDIO | device→computer | `[seq][0x80]` + 804B IMA ADPCM block | 807B |
+| `0x02` EVENT | both ways | UTF-8 JSON line (**including the trailing `\n`**) | ≤ 513B |
+| `0x03` BEACON | computer→device | UTF-8 JSON `{"v":1,"role":"pc","port":33333}` | ~40B |
+| `0x04` PING | device→computer | empty | 1B |
 
-`0x04 PING` 是**纯判活**报文：设备在语音应用运行期间每 **2000ms** 发一发。
-它由 `udp_transport.py` 在读线程里直接消费（刷新设备地址与时刻），**不会派发到
-relay**，所以 relay 核心完全不知道它的存在。没有它，设备空闲（没在录音、没事件）
-时 companion 无法把"设备还在"和"设备退出了语音应用"区分开。
+`0x04 PING` is a **pure liveness** packet: while the voice app is running, the device sends one every **2000ms**.
+It is consumed directly in the read thread by `udp_transport.py` (refreshing the device address and timestamp) and is **not dispatched to
+the relay**, so the relay core does not know it exists. Without it, when the device is idle (not recording, no events) the companion
+cannot tell "the device is still there" from "the device left the voice app".
 
-### 3.1 为什么 AUDIO 仍保留 2B 分片帧头
+### 3.1 Why AUDIO still keeps the 2B fragment header
 
-BLE 时代帧头是 `[块序号][片序号|0x80 末片]`，用途是"片级丢失只损坏该块，后续块不失步"。
-UDP 下每块恒为**单片 + 末片**，帧头退化为 `[seq][0x80]`，但**保留它让 companion 的
-`reassemble_adpcm()` 一行都不用改** —— 它照旧按"新 seq + is_last"终结并解码。
-`seq` 每块 `++ mod 256`，重复/迟到块由 companion 现有的 `last_seq` 逻辑丢弃。
+In the BLE era the header was `[block seq][fragment seq|0x80 last fragment]`, used so that "a lost fragment corrupts only that block, and later blocks stay in sync".
+Over UDP every block is always **a single fragment + last fragment**, so the header degenerates to `[seq][0x80]`, but **keeping it means the companion's
+`reassemble_adpcm()` needs no changes at all**: it still terminates and decodes on "new seq + is_last".
+`seq` does `++ mod 256` per block, and duplicate/late blocks are discarded by the companion's existing `last_seq` logic.
 
-### 3.2 为什么 EVENT 带 `\n`
+### 3.2 Why EVENT carries `\n`
 
-与 BLE 一致，companion 的 `reassemble_event()` 按 `\n` 切行，零改动。
+Same as BLE: the companion's `reassemble_event()` splits lines on `\n`, with zero changes.
 
 ---
 
-## 4. 发现与链路判定
+## 4. Discovery and link determination
 
 ```
-companion ──beacon(1s)──► 设备
-                             │ 记录 src_ip + 时刻
+companion ──beacon(1s)──► device
+                             │ records src_ip + timestamp
                              ▼
-                     首次/换 IP/距上次 >3s → 上行 device.hello
+                     first time / IP changed / >3s since last → uplink device.hello
                              │
-设备 ──AUDIO/EVENT 单播──► companion（来源地址即设备地址）
+device ──AUDIO/EVENT unicast──► companion (source address is the device address)
 ```
 
-| 状态 | 判定 |
+| State | Determination |
 | --- | --- |
-| `link_up` | 已学到对端 IP **且** 距最近一次收到对端报文 < `PEER_TIMEOUT_MS`(3000) |
-| `link_up == false` | UI 显示 OFFLINE 横幅、**PTT 禁止**（与 BLE「未订阅 EVENT」同语义） |
-| `connected` | 同 `link_up`（BLE 时代 connected 与 subscribed 是两态，UDP 下无此区分） |
+| `link_up` | Peer IP learned **and** < `PEER_TIMEOUT_MS` (3000) since the last packet received from the peer |
+| `link_up == false` | UI shows an OFFLINE banner, **PTT disabled** (same semantics as BLE "EVENT not subscribed") |
+| `connected` | Same as `link_up` (in the BLE era connected and subscribed were two states; there is no such distinction over UDP) |
 
-设备侧对外接口与原 `ble_audio_*` 一一对应，`mode.c` / `app_voice.cc` 只需换函数名。
+The device-side external interface maps one-to-one onto the original `ble_audio_*`, so `mode.c` / `app_voice.cc` only need the function names swapped.
 
-### 4.1 怎么重连（设备全自动 / 电脑要手动重启）
+### 4.1 How to reconnect (fully automatic on the device / manual restart on the computer)
 
-**设备侧：全自动，没有任何按键或菜单。**
+**Device side: fully automatic, with no key or menu involved.**
 
-- 语音应用运行期间 socket 一直 `bind 33333` 听 beacon（`udp_audio.c` 的 `rx_task`）。
-- 收到 beacon → 学到电脑 IP → 立即回一发 `device.hello`。日志：
-  `companion beacon 来自 192.168.x.x → link up`。
-- 电脑静默超过 `VOICE_UDP_PEER_TIMEOUT_MS`（3000 ms，= 3 个 beacon 周期）→ `link_up=false`
-  → UI 弹「与电脑断开，正在重连」横幅、**PTT 禁止**。
-- beacon 一恢复就自动续上：`peer_accept_beacon()` 发现"对端消失过又回来"
-  （间隔 > `PEER_STALE_US`，实际等于 3 s）会**再发一次 hello**，让 companion 重新学到设备地址。
-- 退出语音应用会清空对端记忆（`udp_audio_deinit()` 清 `s_peer_known`），下次进入重新发现。
+- While the voice app runs, the socket stays `bind 33333` listening for beacons (`rx_task` in `udp_audio.c`).
+- On receiving a beacon → learn the computer IP → immediately reply with a `device.hello`. Log:
+  `companion beacon from 192.168.x.x → link up`.
+- If the computer stays silent longer than `VOICE_UDP_PEER_TIMEOUT_MS` (3000 ms, = 3 beacon periods) → `link_up=false`
+  → the UI pops up a "Disconnected from computer, reconnecting" banner and **PTT is disabled**.
+- As soon as the beacon resumes it continues automatically: `peer_accept_beacon()` notices that "the peer disappeared and came back"
+  (interval > `PEER_STALE_US`, effectively 3 s) and **sends hello again**, so the companion learns the device address anew.
+- Leaving the voice app clears the peer memory (`udp_audio_deinit()` clears `s_peer_known`), and discovery starts over the next time it is entered.
 
-**电脑侧：v1 不自动重连 —— 断开后必须重启 relay。**
+**Computer side: v1 does not auto-reconnect; after a disconnect the relay must be restarted.**
 
-- `udp_transport.py` 类注释原文即为 *「Wi-Fi UDP 传输层(单设备;v1 不自动重连, 对齐 BLE 语义)」*。
-- 设备静默 `LINK_TIMEOUT`（6.0 s，= 3 个 PING 周期）→ 触发 `on_disconnect`
-  → `relay.py` 的 `_handle_disconnect()` 置 `_stop` 并给两个队列塞 stop
-  → `_drain()` 退出 → `run()` 的 `finally` 收束会话并 `t.disconnect()`
-  → **`run()` 返回，进程结束**。
-- 所以"重连"的动作 = **在电脑上重新跑一次** `python companion/relay.py`。
+- The original class comment in `udp_transport.py` reads *"Wi-Fi UDP transport layer (single device; v1 does not auto-reconnect, aligned with BLE semantics)"*.
+- If the device is silent for `LINK_TIMEOUT` (6.0 s, = 3 PING periods) → `on_disconnect` is triggered
+  → `_handle_disconnect()` in `relay.py` sets `_stop` and pushes a stop into both queues
+  → `_drain()` exits → the `finally` in `run()` wraps up the session and calls `t.disconnect()`
+  → **`run()` returns and the process ends**.
+- So the "reconnect" action = **run `python companion/relay.py` again on the computer**.
 
-电脑侧通道由 `companion/config.local.json` 决定：
+The computer-side channel is determined by `companion/config.local.json`:
 
 ```json
 { "channel": "wifi", "udp_port": "" }
 ```
 
-（`udp_port` 留空即用 33333。`relay.py` 的 `_build_transport()` 按此选 `UdpTransport`。）
+(Leaving `udp_port` empty uses 33333. `_build_transport()` in `relay.py` picks `UdpTransport` accordingly.)
 
-**连不上的三个前提**（任一不满足就永远 OFFLINE）：
+**Three prerequisites for connecting** (if any is not met, it stays OFFLINE forever):
 
-1. 设备与电脑**在同一子网**（接同一个路由器）；路由器不能开 **AP 隔离**。
-2. 电脑上 companion 正在运行，且 `channel` 为 `wifi`。
-3. Windows **防火墙放行入站 UDP 33333**（首次运行会弹窗，需点允许）。
+1. The device and the computer are **on the same subnet** (connected to the same router); the router must not have **AP isolation** enabled.
+2. The companion is running on the computer, with `channel` set to `wifi`.
+3. The Windows **firewall allows inbound UDP 33333** (a prompt appears on first run; click Allow).
 
-**日志对照**：
+**Log reference**:
 
-| 现象 | 含义 |
+| Observation | Meaning |
 | --- | --- |
-| `UDP 通道就绪(port 33333),等待 companion beacon` | 设备已在听，但还没听到电脑 |
-| `companion beacon 来自 192.168.x.x → link up` | 已重连成功 |
-| 只有第一行、一直不上来 | 电脑没在广播 / 不同网段 / 防火墙拦了 / AP 隔离 |
+| `UDP channel ready (port 33333), waiting for companion beacon` | The device is listening but has not yet heard the computer |
+| `companion beacon from 192.168.x.x → link up` | Reconnected successfully |
+| Only the first line, never progressing | The computer is not broadcasting / different subnet / blocked by firewall / AP isolation |
 
-> 实测踩过的坑：设备连 `ZTE-2302-5G` 拿到 `192.168.5.4`，而当时那台电脑唯一可路由地址是
-> `192.168.1.3`（以太网，Wi-Fi 网卡全部断开）→ 不同网段，beacon 根本到不了设备。
-> **电脑必须接到设备所在的同一个 Wi-Fi/路由器上**，不是"能上网"就行。
+> A pitfall hit in testing: the device connected to `ZTE-2302-5G` and got `192.168.5.4`, while the only routable address of that computer at the time was
+> `192.168.1.3` (Ethernet, with all Wi-Fi adapters disconnected) → different subnets, so the beacon could never reach the device.
+> **The computer must be on the same Wi-Fi/router as the device**; merely "having internet access" is not enough.
 
 ---
 
-## 5. 会话时序
+## 5. Session sequence
 
 ```
-设备                                          电脑 companion
- │  按住 UP → 本地提示音 → 开始采集
- │ ── EVENT voice.start(audio=ima_adpcm) ──►   开始 ASR 流
- │ ── AUDIO ×N（每 100ms 一块） ──────────►   逐块解码 → 喂火山 ASR
- │                                             └─ 中间结果 → 悬浮窗 / 下行 transcript
- │  松开 UP → drain 环 → voice.end
- │ ── EVENT voice.end ────────────────────►   发送 ASR 收尾
- │ ── EVENT status(drop=n) ───────────────►   与本地实收帧数对账
- │ ◄─ EVENT agent.status(done) ────────────   设备回 DONE
+Device                                        Computer companion
+ │  hold UP → local beep → start capture
+ │ ── EVENT voice.start(audio=ima_adpcm) ──►   start ASR stream
+ │ ── AUDIO ×N (one block every 100ms) ────►   decode block by block → feed Volcano ASR
+ │                                             └─ interim results → floating window / downlink transcript
+ │  release UP → drain ring → voice.end
+ │ ── EVENT voice.end ────────────────────►   send ASR finalization
+ │ ── EVENT status(drop=n) ───────────────►   reconcile with the locally received frame count
+ │ ◄─ EVENT agent.status(done) ────────────   device replies DONE
 ```
 
-下行（电脑→设备）只有 `type=0x02` EVENT：`transcript` / `agent.status` /
-`agent.approval_request` / `time.set`，全部经 `app_protocol_parse()` 投事件，与 BLE 完全一致。
+The downlink (computer→device) has only `type=0x02` EVENT: `transcript` / `agent.status` /
+`agent.approval_request` / `time.set`, all posted as events via `app_protocol_parse()`, exactly the same as BLE.
 
 ---
 
-## 6. 丢包与对账
+## 6. Packet loss and reconciliation
 
-- 每个音频数据报 = 一个 100ms 块；块自带 predictor/index 头 → **丢一块只损失该 100ms，后续不失步**。
-- companion 的 `_finalize_adpcm_block()` 已实现 miss 计数与"补零保节拍"，本改造**不改它**。
-- 设备端 `audio_streamer_take_drops()` 继续在 `voice.end` 后随 `status` 帧上报，双端对账口径不变。
-- 与 BLE 相比新增：UDP 无重传，**丢包率会真实反映在转写里**（BLE 靠链路层重传掩盖）。局域网内实测应接近 0。
+- Each audio datagram = one 100ms block; a block carries its own predictor/index header → **losing a block costs only that 100ms, and later blocks stay in sync**.
+- The companion's `_finalize_adpcm_block()` already implements miss counting and "zero-fill to keep the beat"; this change **does not touch it**.
+- The device-side `audio_streamer_take_drops()` continues to report with the `status` frame after `voice.end`, so the two-sided reconciliation convention is unchanged.
+- New compared with BLE: UDP has no retransmission, so **the loss rate is genuinely reflected in the transcription** (BLE masked it with link-layer retransmission). On a LAN, measured loss should be close to 0.
 
 ---
 
-## 7. 移除清单 / 不动清单
+## 7. Removal list / untouched list
 
-**移除**
+**Remove**
 
-- `main/apps/voice/ble_audio.c` / `ble_audio.h`（747 行）+ `main/CMakeLists.txt` 中的条目与 `bt` 依赖
-- `app_voice.cc` 的 `suspend_wifi_driver()` / `resume_wifi_driver()`（进语音不再停 Wi-Fi）
-- `mode.c` 里的 USB 半成品分支（`mode_channel_up(USB)` 恒 false，从来不可用）
+- `main/apps/voice/ble_audio.c` / `ble_audio.h` (747 lines) + their entries in `main/CMakeLists.txt` and the `bt` dependency
+- `suspend_wifi_driver()` / `resume_wifi_driver()` in `app_voice.cc` (entering voice no longer stops Wi-Fi)
+- The half-finished USB branch in `mode.c` (`mode_channel_up(USB)` is always false and was never usable)
 
-**不动**
+**Untouched**
 
 - `app_protocol.c` / `audio_streamer.c` / `adpcm.c` / `app_state.c` / `app_ui.c` / `app_events.c`
-  —— 这些全是通道无关的，一行不改。
+  — these are all channel-agnostic, with not a single line changed.
 
 ---
 
-## 8. 未决 / 风险（需知悉）
+## 8. Open items / risks (to be aware of)
 
-1. **局域网前提**：设备与电脑必须在同一子网。若路由器开了 **AP 隔离（client isolation）**，
-   广播到不了设备 → 永远 OFFLINE。家用路由器默认关闭该功能。
-2. **无加密、无鉴权**（⚠️ 本次唯一的**安全回退**）：BLE 时代靠配对加密防窃听与防注入；
-   UDP 明文且无身份校验 —— 同网段的任何主机都能伪造 beacon 让设备连过去，或伪造下行 JSON。
-   当前接受（个人设备 + 家用局域网）。若要收紧：beacon 带共享密钥，UDP 载荷加 HMAC。
-3. **首次运行需放行防火墙**：Windows 会拦截入站 UDP 33333，需在弹窗中允许（或手动加规则）。
-4. **单设备假设**：端口 33333 固定，同网关两套设备会冲突。本版按单设备设计。
-5. **待真机确认**：ESP32-C3 在 Wi-Fi 常驻 + LVGL + 音频采集并存时的堆余量
-   （原 BLE 方案靠 `esp_wifi_deinit()` 腾内存；现在 Wi-Fi 常驻，必须实测）。
+1. **LAN prerequisite**: the device and the computer must be on the same subnet. If the router has **AP isolation (client isolation)** enabled,
+   the broadcast cannot reach the device → OFFLINE forever. Home routers disable this feature by default.
+2. **No encryption, no authentication** (⚠️ the only **security regression** in this change): in the BLE era, pairing encryption prevented eavesdropping and injection;
+   UDP is plaintext with no identity check, so any host on the same subnet can forge a beacon to make the device connect to it, or forge downlink JSON.
+   This is currently accepted (personal device + home LAN). To tighten it: add a shared secret to the beacon and an HMAC to the UDP payload.
+3. **Firewall must be allowed on first run**: Windows blocks inbound UDP 33333; allow it in the prompt (or add a rule manually).
+4. **Single-device assumption**: port 33333 is fixed, so two sets of devices behind the same gateway would conflict. This version is designed for a single device.
+5. **To be confirmed on real hardware**: the heap headroom of the ESP32-C3 with Wi-Fi resident + LVGL + audio capture coexisting
+   (the original BLE approach freed memory via `esp_wifi_deinit()`; now that Wi-Fi stays resident, it must be measured).
 
 ---
 
-## 9. 实测结果（2026-09-12）
+## 9. Measured results (2026-09-12)
 
-| 项 | 改造前 | 改造后 |
+| Item | Before | After |
 | --- | --- | --- |
-| 固件体积 | 3,108,096 B | **2,870,416 B（−232 KB）** |
-| app 分区剩余 | 26% | **32%** |
-| 传输层代码 | `ble_audio.c` 747 行 + `mode.c` 55 行 | `udp_audio.c` 348 行 + `mode.c` 56 行 |
-| ELF 里的 NimBLE 符号 | 存在 | **零**（`nm` 查不到 `ble_audio*` / `nimble_port*` / `ble_gap_*` / `ble_gatts*`） |
-| 进语音时的 Wi-Fi | `StopStation()` + `esp_wifi_deinit()` | **完全不动** |
+| Firmware size | 3,108,096 B | **2,870,416 B (−232 KB)** |
+| App partition free | 26% | **32%** |
+| Transport layer code | `ble_audio.c` 747 lines + `mode.c` 55 lines | `udp_audio.c` 348 lines + `mode.c` 56 lines |
+| NimBLE symbols in the ELF | present | **zero** (`nm` finds no `ble_audio*` / `nimble_port*` / `ble_gap_*` / `ble_gatts*`) |
+| Wi-Fi when entering voice | `StopStation()` + `esp_wifi_deinit()` | **left completely alone** |
 
-编译：`BUILD_EXIT=0`（WSL + ESP-IDF 5.5.3）。
+Build: `BUILD_EXIT=0` (WSL + ESP-IDF 5.5.3).
 
-> 体积下降主要来自 `bt` 组件不再被链接 —— 光删源码不会掉 232KB，是整块 NimBLE 栈
-> 退出链接的结果。这也顺带说明：只要没人引用，`CONFIG_BT_ENABLED=y` 不会把代码带进固件。
+> The size reduction mainly comes from the `bt` component no longer being linked: deleting source alone would not drop 232KB; it is the result of the whole NimBLE stack
+> dropping out of the link. This also shows that as long as nobody references it, `CONFIG_BT_ENABLED=y` does not bring code into the firmware.
 >
-> 更正一个此前的乐观估算：曾写"voice 4.4k 行 → ~1.5k 行"。实测 voice 目录（含头文件、
-> UI、状态机）仍有 4,865 行 —— 真正被砍掉的是传输层约 400 行与整个 NimBLE 依赖；
-> UI / 状态机 / 协议层本来就该留着，不该算进"可删"。
+> A correction to an earlier optimistic estimate: it was once written that "voice 4.4k lines → ~1.5k lines". Measured, the voice directory (including headers,
+> UI and state machine) is still 4,865 lines; what was actually cut is about 400 lines of transport layer and the entire NimBLE dependency;
+> the UI / state machine / protocol layer should have stayed all along and should not have been counted as "removable".
 >
-> 后续清理（2026-09-12 复核）：§7 计划删除的 `ble_audio.c`(747) / `ble_audio.h`(128)
-> 当时仍留在工作区（未进 CMakeLists、无人 include），已确认删除。voice 目录随之
-> 4,865 → **3,991 行**（`_diag/elf_verify2.log`），固件体积与符号表均无变化
-> （`_diag/build_udp2.log`：仍是 `0x2bcc90` / 32% free）。
+> Follow-up cleanup (rechecked 2026-09-12): the `ble_audio.c` (747) / `ble_audio.h` (128) planned for deletion in §7
+> were still in the workspace at the time (not in CMakeLists, included by nobody); deletion has been confirmed. The voice directory went
+> from 4,865 → **3,991 lines** (`_diag/elf_verify2.log`), and neither the firmware size nor the symbol table changed
+> (`_diag/build_udp2.log`: still `0x2bcc90` / 32% free).

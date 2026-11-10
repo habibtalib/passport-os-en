@@ -9,16 +9,16 @@
 extern "C" {
 #endif
 
-// 建立单页麦克风遥控界面。须在 bsp_display_init + bsp_lvgl_init 成功后调用,
-// 且调用方须持 LVGL 锁(bsp_lvgl_lock)。
+// Builds the single-page microphone remote UI. Call only after bsp_display_init + bsp_lvgl_init succeed,
+// and the caller must hold the LVGL lock (bsp_lvgl_lock).
 esp_err_t app_ui_init(void);
 void app_ui_deinit(void);
 
 void app_ui_show(void);
 void app_ui_hide(void);
 
-// 按快照刷新 UI。同样须持锁调用(唯一写者:app_task)。
-// 整机息屏/唤醒由 app_registry 管理。
+// Refresh the UI from a snapshot. Also must be called with the lock held (sole writer: app_task).
+// Whole-device screen off / wake is managed by app_registry.
 void app_ui_render(const app_ui_snapshot_t *snap);
 
 #ifdef __cplusplus

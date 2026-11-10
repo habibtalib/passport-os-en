@@ -1,8 +1,8 @@
-// main/adpcm.c —— IMA ADPCM 4:1 编解码实现(设计与位序见 adpcm.h)。
-// 纯函数、无全局状态、无动态分配:可直接在 host 测试中跑往返与独立性用例。
+// main/adpcm.c -- IMA ADPCM 4:1 codec implementation (design and bit order: see adpcm.h).
+// Pure functions, no global state, no dynamic allocation: round-trip and independence cases run directly in host tests.
 #include "adpcm.h"
 
-// IMA ADPCM 标准表(与 WAV / libsndfile / Mac 端 companion/adpcm.py 必须一致)
+// Standard IMA ADPCM table (must match WAV / libsndfile / the Mac-side companion/adpcm.py)
 static const int16_t k_step[89] = {
     7,     8,     9,     10,    11,    12,    13,    14,    16,    17,
     19,    21,    23,    25,    28,    31,    34,    37,    41,    45,
@@ -27,7 +27,7 @@ static inline int clamp_index(int idx) {
     return idx;
 }
 
-// int16 饱和:ADPCM 重建值可能越界,必须夹紧(否则回绕成反相爆音)
+// int16 saturation: ADPCM reconstructed values may overflow and must be clamped (otherwise they wrap into a phase-inverted pop)
 static inline int16_t clamp_s16(int32_t v) {
     if (v > 32767) return 32767;
     if (v < -32768) return -32768;
@@ -40,14 +40,14 @@ void adpcm_state_reset(adpcm_state_t *st) {
     st->index = 0;
 }
 
-// 单样本 → 4bit code,并就地推进 predictor/index(编解码必须走同一重建公式,
-// 否则编码端与解码端的 predictor 会分叉 → 失真累积)。
+// Single sample -> 4-bit code, advancing predictor/index in place (encode and decode must use the same reconstruction formula,
+// otherwise encoder and decoder predictors diverge -> accumulating distortion).
 static uint8_t encode_sample(adpcm_state_t *st, int16_t sample) {
     int step = k_step[st->index];
     int32_t diff = (int32_t)sample - (int32_t)st->predictor;
     uint8_t code = 0;
     if (diff < 0) {
-        code = 8;          // 符号位
+        code = 8;          // sign bit
         diff = -diff;
     }
     int32_t tmp = step;
@@ -57,7 +57,7 @@ static uint8_t encode_sample(adpcm_state_t *st, int16_t sample) {
     tmp >>= 1;
     if (diff >= tmp) { code |= 1; }
 
-    // 与解码端逐字对应的重建
+    // Reconstruction mirrors the decoder step by step
     int32_t diffq = step >> 3;
     if (code & 4) diffq += step;
     if (code & 2) diffq += step >> 1;
@@ -86,22 +86,22 @@ size_t adpcm_encode_block(adpcm_state_t *st, const int16_t *pcm, size_t samples,
     const size_t need = ADPCM_HEADER_BYTES + samples / 2;
     if (out_cap < need) return 0;
 
-    // 块头:首样本原值 + 当前自适应 index。predictor 每块以原值重置 ——
-    // ①解码端无需上一块即可自洽 ②跨块误差不累积。
+    // Block header: first sample raw + current adaptive index. The predictor is reset to the raw value each block --
+    // (1) the decoder is self-contained without the previous block (2) cross-block error does not accumulate.
     st->predictor = pcm[0];
     out[0] = (uint8_t)((uint16_t)pcm[0] & 0xFF);
     out[1] = (uint8_t)(((uint16_t)pcm[0] >> 8) & 0xFF);
     out[2] = st->index;
-    out[3] = 0;   // 保留:置 0,解码端不解释
+    out[3] = 0;   // reserved: set to 0, the decoder ignores it
 
     size_t w = ADPCM_HEADER_BYTES;
-    // 首样本已在头部,数据区从第 2 个样本起;低半字节先。
-    // 奇数个待编码样本时,末字节高半字节留 0(解码端按 samples 计数,不会读它)。
+    // The first sample is already in the header; the data area starts at the 2nd sample; low nibble first.
+    // With an odd number of samples to encode, the last byte's high nibble stays 0 (the decoder counts by samples and never reads it).
     for (size_t i = 1; i < samples; i++) {
         uint8_t code = encode_sample(st, pcm[i]);
         if ((i & 1) == 1) {
-            out[w] = (uint8_t)(code & 0x0F);        // 低半字节:先写,占位
-            if (i + 1 == samples) w++;              // 收尾:高半字节留 0
+            out[w] = (uint8_t)(code & 0x0F);        // low nibble: written first, placeholder
+            if (i + 1 == samples) w++;              // tail: high nibble stays 0
         } else {
             out[w] = (uint8_t)(out[w] | (uint8_t)(code << 4));
             w++;
@@ -118,7 +118,7 @@ size_t adpcm_decode_block(const uint8_t *in, size_t in_len, size_t samples,
 
     adpcm_state_t st;
     st.predictor = (int16_t)(uint16_t)((uint16_t)in[0] | ((uint16_t)in[1] << 8));
-    st.index = (uint8_t)clamp_index(in[2]);   // 越界头部按夹紧处理,不越表读
+    st.index = (uint8_t)clamp_index(in[2]);   // clamp an out-of-range header index, never read past the table
     pcm[0] = st.predictor;
 
     size_t r = ADPCM_HEADER_BYTES;

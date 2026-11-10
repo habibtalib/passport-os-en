@@ -1,10 +1,10 @@
-// 俄罗斯方块 App。
-// 内存策略(与声控飞鸟同一套纪律):
-//   1. 唯一大对象是棋盘画布 80x160 RGB565 = 25.6KB,start() 堆分配/stop() 释放
-//      (进入前最大连续块 ~106KB,余量 4 倍);游戏过程零堆分配;
-//   2. 游戏循环 = 50ms lv_timer,不另起任务;逻辑在 tetris_core(纯整数);
-//   3. 结算面板用"移出屏幕"显隐 —— HIDDEN 标志路径在 LVGL 9.3 有死循环雷(见 app_game);
-//   4. stop() 后堆回到进入前水平。
+// Tetris app.
+// Memory policy (same discipline as the voice-controlled flyer):
+//   1. The only big object is the 80x160 RGB565 board canvas = 25.6KB, heap-allocated in start() / freed in stop()
+//      (largest contiguous block before entry ~106KB, 4x headroom); zero heap allocation during play;
+//   2. Game loop = 50ms lv_timer, no extra task; logic lives in tetris_core (pure integers);
+//   3. The game-over panel is shown/hidden by "moving off-screen" -- the HIDDEN flag path has a dead-loop landmine in LVGL 9.3 (see app_game);
+//   4. After stop() the heap returns to its pre-entry level.
 #pragma once
 
 #include "apps/app_base.h"

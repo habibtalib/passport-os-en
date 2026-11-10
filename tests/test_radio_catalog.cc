@@ -87,17 +87,17 @@ int main(int argc,char **argv) {
     auto n=radio_catalog_discover_location(preferred,stations,8,&location,cancel);
     assert(n==8&&ip_requests==0&&queries.size()==2);
     assert(!std::strcmp(stations[0].name,"珠海交通875")&&stations[0].frequency_decihz==875);
-    assert(std::strstr(stations[0].description,"当地")&&std::strstr(stations[2].description,"省内"));unique(stations,n);
+    assert(std::strstr(stations[0].description,"Local")&&std::strstr(stations[2].description,"Provincial"));unique(stations,n);
 
     reset();
     city_fixture="["+station("一台","http://unique/live")+"]";
     province_fixture="["+station("重复","http://unique/live")+","+station("省台","http://province/live")+"]";
     n=radio_catalog_discover_location(preferred,stations,8,&location,cancel);
-    assert(n==8&&queries.size()==3&&std::strstr(stations[2].description,"推荐"));unique(stations,n);
+    assert(n==8&&queries.size()==3&&std::strstr(stations[2].description,"Featured"));unique(stations,n);
 
     reset();ip_city="Jiangmen";city_fixture="["+station("江门电台","http://jm/live")+"]";
     n=radio_catalog_discover(stations,8,&location,cancel);
-    assert(n==7&&ip_requests==1&&!std::strcmp(location.city,"江门"));
+    assert(n==7&&ip_requests==1&&!std::strcmp(location.city,"Jiangmen")&&!std::strcmp(location.search_city,"江门"));
     assert(queries[0].find("name=江门")!=std::string::npos);
 
     reset();fail_dns=true;fail_first=true;city_fixture="["+station("恢复","http://ok/live")+"]";

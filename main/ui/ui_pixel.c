@@ -1,4 +1,4 @@
-// main/ui/ui_pixel.c —— 全机共享的像素风设计系统实现。见 ui_pixel.h。
+// main/ui/ui_pixel.c - implementation of the pixel-style design system shared across the device. See ui_pixel.h.
 #include "ui_pixel.h"
 
 #include <stdio.h>
@@ -82,10 +82,10 @@ uint32_t ui_theme_portrait_subject_color(uint8_t level)
 const char *ui_theme_name(ui_theme_t theme)
 {
     switch (theme) {
-        case UI_THEME_TRAVEL: return "旅行仪器";
-        case UI_THEME_PLAYFUL: return "像素白";
-        case UI_THEME_NEON: return "霓虹黑";
-        default: return "经典绿";
+        case UI_THEME_TRAVEL: return "Travel Gauge";
+        case UI_THEME_PLAYFUL: return "Pixel White";
+        case UI_THEME_NEON: return "Neon Black";
+        default: return "Classic Green";
     }
 }
 
@@ -234,7 +234,7 @@ lv_obj_t *ui_pixel_mascot_create(lv_obj_t *parent, int x, int y)
     lv_obj_set_style_border_width(m, 0, 0);
     lv_obj_set_style_pad_all(m, 0, 0);
 
-    /* 原创“小电视机器人”：天线、发光屏幕脸、橙色围巾与履带脚。 */
+    /* Original "little TV robot": antenna, glowing screen face, orange scarf and tracked feet. */
     block(m, 18, 0, 3, 6, UI_INK);
     block(m, 16, 0, 7, 3, UI_ORANGE);
     block(m, 3, 6, 32, 24, UI_INK);
@@ -304,7 +304,7 @@ void ui_pixel_set_selected(lv_obj_t *panel, bool selected, bool enabled)
         lv_color_hex(selected && enabled ? UI_AMBER : UI_BORDER), 0);
 }
 
-// ==================== 2026-09-13 新增共享构件 ====================
+// ==================== 2026-09-13 new shared components ====================
 
 lv_obj_t *ui_pixel_title_plate(lv_obj_t *parent, int y, const char *text,
                                const lv_font_t *font)
@@ -373,7 +373,7 @@ ui_pixel_battery_t ui_pixel_battery_create(lv_obj_t *parent, int x, int y,
     lv_obj_set_style_border_width(frame, 2, 0);
     lv_obj_set_style_border_color(frame, lv_color_hex(frame_color), 0);
     lv_obj_set_style_radius(frame, 0, 0);
-    block(parent, x + 24, y + 3, 3, 6, frame_color);      // 右缘触点
+    block(parent, x + 24, y + 3, 3, 6, frame_color);      // right edge contact
 
     b.fill = block(frame, 2, 2, 2, 6, frame_color);
     lv_obj_set_style_radius(b.fill, 0, 0);
@@ -394,7 +394,7 @@ static void battery_set(ui_pixel_battery_t *batt, int soc, bool dark)
     char text[8];
     ui_color_role_t role;
     if (soc >= 0 && soc <= 100) {
-        // 满电绿、中段黄、低电红 —— 与整机"状态色"语义一致。
+        // Full battery green, mid yellow, low red - consistent with the device-wide "status color" semantics.
         role = soc <= 15 ? UI_COLOR_DANGER
                         : (soc <= 35 ? UI_COLOR_WARNING : UI_COLOR_SUCCESS);
         snprintf(text, sizeof(text), "%d%%", soc);
@@ -421,7 +421,7 @@ void ui_pixel_battery_set_on_dark(ui_pixel_battery_t *batt, int soc)
 
 void ui_pixel_wifi_bars_create(lv_obj_t *parent, int x, int y, lv_obj_t *bars[3])
 {
-    // y 为最低一条的底边;三条逐级升高,占位 16×13。
+    // y is the bottom edge of the lowest bar; three bars rise step by step, occupying 16x13.
     for (int i = 0; i < 3; ++i) {
         const int h = 5 + i * 4;
         bars[i] = block(parent, x + i * 6, y - h, 4, h, UI_TEXT_DIM);

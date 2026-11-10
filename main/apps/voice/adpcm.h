@@ -1,17 +1,17 @@
-// main/adpcm.h —— IMA ADPCM 4:1 编解码(BLE 音频通道压缩)。
+// main/adpcm.h -- IMA ADPCM 4:1 codec (compression for the BLE audio channel).
 //
-// 为什么是 ADPCM 而不是 Opus:BLE 上不去的真瓶颈是 mbuf 池(4×256B)+ "首片
-// 失败即整帧作废",不是空口带宽(见任务 design.md §3)。修掉瓶颈后 8KB/s 只需
-// 约 0.7 包/连接事件,Opus 多出的压缩率没有用处可花,却要 38.5KB 静态状态 +
-// 16KB 栈 —— 恰好挤掉修瓶颈所需的堆。ADPCM 状态 4 字节、无堆、无 alloca。
+// Why ADPCM and not Opus: the real BLE bottleneck is the mbuf pool (4x256B) plus "first fragment
+// fails -> whole frame discarded", not air bandwidth (see task design.md section 3). With the bottleneck fixed, 8KB/s needs only
+// about 0.7 packets per connection event; Opus's extra compression is of no use, yet it needs 38.5KB of static state +
+// 16KB of stack -- exactly the heap needed to fix the bottleneck. ADPCM state is 4 bytes, no heap, no alloca.
 //
-// block 独立可解:每块头部携带 predictor(该块首样本原值)与自适应 index,
-// 解码器只依赖头部,不依赖上一块 —— 丢一块只损失该块 100ms,不会污染后续。
-// 编码器的 index 跨块延续(仅为音质:避免每块从 step_table[0] 重新爬升),
-// 但既然快照进了头部,独立性不受影响;predictor 每块以首样本原值重置,
-// 顺带消除跨块误差累积。
+// Each block decodes independently: the block header carries the predictor (the block's first sample, raw) and the adaptive index,
+// the decoder depends only on the header, not on the previous block -- losing a block costs only that 100ms and does not pollute later ones.
+// The encoder's index carries across blocks (for sound quality only: avoids re-climbing from step_table[0] each block),
+// but since it is snapshotted into the header, independence is unaffected; the predictor is reset to the first sample's raw value each block,
+// which also removes cross-block error accumulation.
 //
-// 位序:低半字节先(与 WAV IMA ADPCM 一致),便于 Mac 端 Python 解码对齐。
+// Nibble order: low nibble first (same as WAV IMA ADPCM), so the Mac-side Python decoder lines up.
 #pragma once
 
 #include <stdbool.h>
@@ -24,27 +24,27 @@ extern "C" {
 
 #define ADPCM_HEADER_BYTES   4      // [int16 LE predictor][uint8 index][uint8 rsv=0]
 #define ADPCM_BLOCK_SAMPLES  1600   // 100ms @ 16kHz(= AUDIO_FRAME_BYTES / 2)
-// 首样本走头部原值,其余 samples-1 个各占 4bit(奇数个时末字节高半字节填 0)
+// The first sample goes in the header raw, the remaining samples-1 take 4 bits each (for an odd count the last byte's high nibble is 0)
 #define ADPCM_BLOCK_BYTES    (ADPCM_HEADER_BYTES + (ADPCM_BLOCK_SAMPLES / 2))   // 804
 
-// 编码器自适应状态(4 字节,栈上即可;解码不需要跨块状态)
+// Encoder adaptive state (4 bytes, fine on the stack; decoding needs no cross-block state)
 typedef struct {
-    int16_t predictor;   // 上一次重建样本值
-    uint8_t index;       // step_table 下标(0..88)
+    int16_t predictor;   // last reconstructed sample value
+    uint8_t index;       // step_table index (0..88)
 } adpcm_state_t;
 
-// 复位到初始自适应状态。会话开始时调用(不跨会话携带上一次的静音自适应)。
+// Reset to the initial adaptive state. Call at session start (do not carry over the previous session's silence adaptation).
 void adpcm_state_reset(adpcm_state_t *st);
 
-// 编码一个 block。samples 必须 ≥1;out_cap 不足或参数非法返回 0(不写越界)。
-// 返回写入 out 的字节数 = ADPCM_HEADER_BYTES + samples/2(samples 为偶数时精确)。
-// st 在返回时携带本块结束后的自适应 index,供下一块延续。
+// Encode one block. samples must be >=1; returns 0 if out_cap is too small or arguments are invalid (never writes out of bounds).
+// Returns bytes written to out = ADPCM_HEADER_BYTES + samples/2 (exact when samples is even).
+// On return st carries the adaptive index at the end of this block, for the next block to continue.
 size_t adpcm_encode_block(adpcm_state_t *st, const int16_t *pcm, size_t samples,
                           uint8_t *out, size_t out_cap);
 
-// 解码一个 block。samples = 该块原始样本数(协议固定:ADPCM_BLOCK_SAMPLES)。
-// in_len / pcm_cap 不足或参数非法返回 0。返回写入 pcm 的样本数。
-// 不需要外部状态:predictor/index 全部来自块头 —— 单块自洽。
+// Decode one block. samples = the block's original sample count (fixed by the protocol: ADPCM_BLOCK_SAMPLES).
+// Returns 0 if in_len / pcm_cap are too small or arguments are invalid. Returns the number of samples written to pcm.
+// Needs no external state: predictor/index all come from the block header -- each block is self-contained.
 size_t adpcm_decode_block(const uint8_t *in, size_t in_len, size_t samples,
                           int16_t *pcm, size_t pcm_cap);
 

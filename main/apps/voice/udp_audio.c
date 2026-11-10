@@ -1,5 +1,5 @@
-// main/apps/voice/udp_audio.c —— Wi-Fi UDP 音频/事件通道实现。
-// 协议契约见 docs/voice-udp-channel.md(与 companion/udp_transport.py 同构)。
+// main/apps/voice/udp_audio.c -- Wi-Fi UDP audio/event channel implementation.
+// Protocol contract: see docs/voice-udp-channel.md (isomorphic with companion/udp_transport.py).
 #include "udp_audio.h"
 
 #include "app_protocol.h"
@@ -18,16 +18,16 @@
 
 static const char *TAG = "udp_audio";
 
-// 一个音频块固定 804B(4B 块头 + 800B 4bit 数据),见 apps/voice/adpcm.h
+// An audio block is fixed at 804B (4B block header + 800B of 4-bit data), see apps/voice/adpcm.h
 #define ADPCM_BLOCK_MAX 804
-// 上行缓冲:[type 1B][payload];最大 payload = 2B 帧头 + 804B 块
+// Uplink buffer: [type 1B][payload]; max payload = 2B frame header + 804B block
 #define TX_BUF_MAX (1 + 2 + ADPCM_BLOCK_MAX)
-// 下行接收缓冲:最大 payload = 513B(EVENT),留余量以识别异常大包
+// Downlink receive buffer: max payload = 513B (EVENT), with headroom to detect oversized packets
 #define RX_BUF_MAX 640
-// 对端"消失过又回来"的判定阈值。注意:这里的 *1000 是 ms→us 换算,结果就是
-// 链路超时本身(3000ms = 3e6us),并非注释旧文所写的"3 倍"。语义上正好:
-// beacon 正常时每秒一发(间隔 ~1s < 3s 不触发),一旦停了 3s 以上说明链路已断,
-// 下一发 beacon 就重发 device.hello 让 companion 重新学到我们。
+// Threshold for deciding the peer "disappeared and came back". Note: the *1000 here is the ms->us conversion, the result is
+// the link timeout itself (3000ms = 3e6us), not the "3x" the old comment claimed. Semantically it fits exactly:
+// with a healthy beacon one is sent every second (interval ~1s < 3s, no trigger); once it stops for over 3s the link is down,
+// and the next beacon re-sends device.hello so the companion learns us again.
 #define PEER_STALE_US ((int64_t)VOICE_UDP_PEER_TIMEOUT_MS * 1000)
 #define MY_IP_STR(buf) ((buf)[0] ? (buf) : "0.0.0.0")
 
@@ -37,25 +37,25 @@ static TaskHandle_t s_rx_task = NULL;
 static SemaphoreHandle_t s_tx_mux = NULL;
 static StaticSemaphore_t s_tx_mux_storage;
 
-// 已学到的对端地址(只有 RX 任务在收到 beacon 时写;s_peer_mux 保护)
+// Learned peer address (written only by the RX task when it receives a beacon; protected by s_peer_mux)
 static struct sockaddr_in s_peer;
 static volatile bool s_peer_known = false;
 static volatile int64_t s_peer_last_us = 0;
 static portMUX_TYPE s_peer_mux = portMUX_INITIALIZER_UNLOCKED;
 
-// 上行缓冲(tx_send 内持有 s_tx_mux 时使用)
+// Uplink buffer (used inside tx_send while holding s_tx_mux)
 static uint8_t s_tx_buf[TX_BUF_MAX];
-// 音频组装缓冲:唯一写者是音频发送 worker,故无需加锁
+// Audio assembly buffer: the only writer is the audio send worker, so no lock is needed
 static uint8_t s_audio_pkt[2 + ADPCM_BLOCK_MAX];
 static uint8_t s_audio_seq = 0;
 
 static portMUX_TYPE s_stat_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_audio_drops = 0;
 static uint32_t s_event_drops = 0;
-static volatile uint32_t s_beacon_cnt = 0;   // 链路诊断:收到 beacon 总数
-static volatile uint32_t s_ping_cnt = 0;     // 链路诊断:发出 ping 总数
+static volatile uint32_t s_beacon_cnt = 0;   // link diagnostics: total beacons received
+static volatile uint32_t s_ping_cnt = 0;     // link diagnostics: total pings sent
 
-// ---- 内部工具 ----
+// ---- Internal helpers ----
 
 static void drop_inc(uint32_t *counter)
 {
@@ -72,7 +72,7 @@ static uint32_t drop_get(uint32_t *counter)
     return v;
 }
 
-// 取对端地址快照。返回 false = 尚未学到对端(链路未 up)。
+// Take a snapshot of the peer address. Returns false = peer not learned yet (link not up).
 static bool peer_snapshot(struct sockaddr_in *out)
 {
     bool known;
@@ -83,7 +83,7 @@ static bool peer_snapshot(struct sockaddr_in *out)
     return known;
 }
 
-// 链路是否新鲜:对端已知且最近 VOICE_UDP_PEER_TIMEOUT_MS 内收到过对端报文。
+// Whether the link is fresh: the peer is known and a packet from it was received within the last VOICE_UDP_PEER_TIMEOUT_MS.
 static bool peer_fresh(void)
 {
     int64_t now = esp_timer_get_time();
@@ -95,15 +95,15 @@ static bool peer_fresh(void)
     return fresh;
 }
 
-// 单播一发。对端未知 / socket 未就绪 / 发送失败返回 -1。
-// s_tx_buf 为共享缓冲,由 s_tx_mux 串行化(audio worker 与 app task 是两个任务)。
+// Unicast one packet. Returns -1 if the peer is unknown / the socket is not ready / the send failed.
+// s_tx_buf is a shared buffer, serialized by s_tx_mux (the audio worker and the app task are two tasks).
 static int tx_send(uint8_t type, const void *payload, size_t len)
 {
     if (s_sock < 0 || len + 1 > TX_BUF_MAX || s_tx_mux == NULL) {
         return -1;
     }
     if (xSemaphoreTake(s_tx_mux, pdMS_TO_TICKS(50)) != pdTRUE) {
-        ESP_LOGW(TAG, "TX 互斥等待超时,丢弃该帧");
+        ESP_LOGW(TAG, "TX mutex wait timed out, dropping this frame");
         return -1;
     }
     int rc = -1;
@@ -116,7 +116,7 @@ static int tx_send(uint8_t type, const void *payload, size_t len)
         if (n == (ssize_t)(len + 1)) {
             rc = 0;
         } else {
-            ESP_LOGW(TAG, "sendto 失败: rc=%d errno=%d", (int)n, errno);
+            ESP_LOGW(TAG, "sendto failed: rc=%d errno=%d", (int)n, errno);
         }
     }
     xSemaphoreGive(s_tx_mux);
@@ -132,10 +132,10 @@ static void send_device_hello(void)
     }
 }
 
-// 判活:每 VOICE_UDP_PING_MS 给 companion 一发空载荷 PING。
-// 设备空闲时不产生任何报文,companion 就分不清"设备还在"和"设备退出了语音应用"
-// —— 这一发是它 6s 静默判断开的唯一依据。链路未通时不发(省得白算)。
-// 不计入丢帧统计:判活失败由 beacon/下次报文自然覆盖,不是音频/事件语义的丢失。
+// Liveness: send the companion an empty-payload PING every VOICE_UDP_PING_MS.
+// When the device is idle it produces no packets at all, and the companion cannot tell "the device is still here" from "the device left the voice app"
+// -- this packet is the only basis for its 6s silence check. Not sent while the link is down (saves wasted work).
+// Not counted in the drop statistics: a failed liveness packet is naturally covered by the beacon / the next packet, it is not a loss of audio/event semantics.
 static void send_liveness_ping(void)
 {
     if (!peer_fresh()) return;
@@ -143,7 +143,7 @@ static void send_liveness_ping(void)
     s_ping_cnt++;
 }
 
-// beacon:建立或刷新对端。返回 true = 需要回一发 device.hello。
+// beacon: establish or refresh the peer. Returns true = a device.hello must be sent back.
 static bool peer_accept_beacon(const struct sockaddr_in *src)
 {
     int64_t now = esp_timer_get_time();
@@ -157,14 +157,14 @@ static bool peer_accept_beacon(const struct sockaddr_in *src)
         s_peer_known      = true;
         need_hello        = true;
     } else if (s_peer_last_us == 0 || now - s_peer_last_us > PEER_STALE_US) {
-        need_hello = true;   // 对端消失过又回来:让 companion 重新学到我们
+        need_hello = true;   // the peer disappeared and came back: let the companion learn us again
     }
     s_peer_last_us = now;
     portEXIT_CRITICAL(&s_peer_mux);
     return need_hello;
 }
 
-// 非 beacon 的下行:仅在与已建立对端同源时续命(防第三方刷报文续活链路)
+// Non-beacon downlink: only extends the link's life when from the same source as the established peer (prevents a third party from keeping the link alive with spoofed packets)
 static void peer_refresh(const struct sockaddr_in *src)
 {
     int64_t now = esp_timer_get_time();
@@ -188,13 +188,13 @@ static void rx_task(void *arg)
         socklen_t slen = sizeof(src);
         ssize_t n = recvfrom(s_sock, rx, sizeof(rx), 0,
                              (struct sockaddr *)&src, &slen);
-        // n <= 0 是 SO_RCVTIMEO(200ms)到期,正常路径 → 直接落到下面的判活节拍
+        // n <= 0 means SO_RCVTIMEO (200ms) expired, the normal path -> fall straight through to the liveness tick below
         if (n > 0) {
             const uint8_t type = rx[0];
             if (type == VOICE_UDP_T_BEACON) {
                 s_beacon_cnt++;
                 if (peer_accept_beacon(&src)) {
-                    ESP_LOGI(TAG, "companion beacon 来自 %s → link up",
+                    ESP_LOGI(TAG, "companion beacon from %s -> link up",
                              inet_ntoa(src.sin_addr));
                     send_device_hello();
                 }
@@ -204,29 +204,29 @@ static void rx_task(void *arg)
                     src.sin_port != peer.sin_port) continue;
                 peer_refresh(&src);
                 size_t plen = (size_t)n - 1;
-                if (plen > APP_PROTO_RX_CAP) plen = APP_PROTO_RX_CAP;   // 截断防御
+                if (plen > APP_PROTO_RX_CAP) plen = APP_PROTO_RX_CAP;   // truncation guard
                 memcpy(json, rx + 1, plen);
                 json[plen] = '\0';
                 app_event_t ev;
                 if (app_protocol_parse(json, plen, &ev)) {
-                    app_protocol_dispatch_event(&ev);   // 审批重要投递,其余零阻塞
+                    app_protocol_dispatch_event(&ev);   // approvals get important delivery, the rest zero-blocking
                 } else {
-                    ESP_LOGW(TAG, "下行 JSON 拒绝: %.*s",
+                    ESP_LOGW(TAG, "downlink JSON rejected: %.*s",
                              (int)(plen > 80 ? 80 : plen), json);
                 }
             } else {
-                ESP_LOGW(TAG, "未知报文类型 0x%02x(%d B),忽略", type, (int)n);
+                ESP_LOGW(TAG, "unknown packet type 0x%02x (%d B), ignored", type, (int)n);
             }
         }
 
-        // 判活节拍:与收包解耦(这一轮有没有报文都要跑)
+        // Liveness tick: decoupled from receiving (runs whether or not a packet arrived this round)
         int64_t now_us = esp_timer_get_time();
         if (last_ping_us == 0 ||
             now_us - last_ping_us >= (int64_t)VOICE_UDP_PING_MS * 1000) {
             last_ping_us = now_us;
             send_liveness_ping();
         }
-        // 链路诊断(每 5s):beacon/ping 计数不涨的一侧就是断点
+        // Link diagnostics (every 5s): the side whose beacon/ping counter does not grow is the break point
         static int64_t last_diag_us = 0;
         if (last_diag_us == 0 ||
             now_us - last_diag_us >= 5000000) {
@@ -247,23 +247,23 @@ static void rx_task(void *arg)
     vTaskDelete(NULL);
 }
 
-// ---- 公开接口 ----
+// ---- Public interface ----
 
 int udp_audio_init(void)
 {
-    if (s_sock >= 0) return 0;   // 幂等
+    if (s_sock >= 0) return 0;   // idempotent
 
     if (s_tx_mux == NULL) {
         s_tx_mux = xSemaphoreCreateMutexStatic(&s_tx_mux_storage);
         if (s_tx_mux == NULL) {
-            ESP_LOGE(TAG, "TX 互斥创建失败");
+            ESP_LOGE(TAG, "TX mutex creation failed");
             return -1;
         }
     }
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock < 0) {
-        ESP_LOGE(TAG, "socket 创建失败: errno=%d", errno);
+        ESP_LOGE(TAG, "socket creation failed: errno=%d", errno);
         return -1;
     }
     struct sockaddr_in addr;
@@ -272,66 +272,66 @@ int udp_audio_init(void)
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port        = htons(VOICE_UDP_PORT);
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        ESP_LOGE(TAG, "bind %d 失败: errno=%d", VOICE_UDP_PORT, errno);
+        ESP_LOGE(TAG, "bind %d failed: errno=%d", VOICE_UDP_PORT, errno);
         close(sock);
         return -1;
     }
-    // 接收超时:让 RX 任务能周期性复查停止位(deinit 才能干净退出)
+    // Receive timeout: lets the RX task periodically recheck the stop flag (so deinit can exit cleanly)
     struct timeval tv;
     tv.tv_sec  = 0;
     tv.tv_usec = 200 * 1000;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    // 允许发往广播地址(设备当前不发广播,保留给将来的主动探测)
+    // Allow sending to the broadcast address (the device does not broadcast now, kept for future active probing)
     int bcast = 1;
     setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &bcast, sizeof(bcast));
 
     s_sock = sock;
     s_active = true;
     if (xTaskCreate(rx_task, "udp_rx", 4096, NULL, 4, &s_rx_task) != pdPASS) {
-        ESP_LOGE(TAG, "RX 任务创建失败");
+        ESP_LOGE(TAG, "RX task creation failed");
         s_active = false;
         close(sock);
         s_sock = -1;
         return -1;
     }
-    ESP_LOGI(TAG, "UDP 通道就绪(port %d),等待 companion beacon", VOICE_UDP_PORT);
+    ESP_LOGI(TAG, "UDP channel ready (port %d), waiting for companion beacon", VOICE_UDP_PORT);
     return 0;
 }
 
 int udp_audio_deinit(void)
 {
-    if (s_sock < 0 && s_rx_task == NULL) return 0;   // 幂等
+    if (s_sock < 0 && s_rx_task == NULL) return 0;   // idempotent
 
-    // 1. 先置停止位:recvfrom 的 200ms 超时会让任务回到循环顶看到它
+    // 1. Set the stop flag first: the 200ms recvfrom timeout brings the task back to the top of the loop where it sees it
     s_active = false;
-    // 2. 等任务自己退出再关 socket —— close 与阻塞中的 recvfrom 并发是竞态
+    // 2. Wait for the task to exit by itself before closing the socket -- close racing a blocked recvfrom is a race
     for (int i = 0; i < 50 && s_rx_task != NULL; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     if (s_rx_task != NULL) {
-        ESP_LOGW(TAG, "RX 任务未在 500ms 内退出(继续关闭,任务将自行收敛)");
+        ESP_LOGW(TAG, "RX task did not exit within 500ms (closing anyway, the task will settle on its own)");
     }
-    // 3. 关 socket
+    // 3. Close the socket
     if (s_sock >= 0) {
         close(s_sock);
         s_sock = -1;
     }
-    // 4. 清对端状态:下次进入重新发现
+    // 4. Clear the peer state: rediscover on the next entry
     portENTER_CRITICAL(&s_peer_mux);
     s_peer_known  = false;
     s_peer_last_us = 0;
     memset(&s_peer, 0, sizeof(s_peer));
     portEXIT_CRITICAL(&s_peer_mux);
     s_audio_seq = 0;
-    ESP_LOGI(TAG, "UDP 通道已关闭");
+    ESP_LOGI(TAG, "UDP channel closed");
     return 0;
 }
 
 int udp_audio_notify_audio(const uint8_t *frame, size_t len)
 {
     if (frame == NULL || len == 0 || len > ADPCM_BLOCK_MAX) return -1;
-    // UDP 下每块恒为单片且是末片 → 帧头 [seq][0x80],与 companion 的
-    // reassemble_adpcm() 期望的"新 seq + is_last"完全一致。
+    // Over UDP each block is always a single and last fragment -> frame header [seq][0x80], exactly what the companion's
+    // reassemble_adpcm() expects: "new seq + is_last".
     s_audio_pkt[0] = s_audio_seq++;
     s_audio_pkt[1] = 0x80;
     memcpy(s_audio_pkt + 2, frame, len);
@@ -350,7 +350,7 @@ int udp_audio_notify_event(const char *line, size_t len)
 
 int udp_audio_notify_event_blocking(const char *line, size_t len, uint32_t timeout_ms)
 {
-    (void)timeout_ms;   // UDP 无发送队列与背压,无等待语义
+    (void)timeout_ms;   // UDP has no send queue or backpressure, no wait semantics
     return udp_audio_notify_event(line, len);
 }
 

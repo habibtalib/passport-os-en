@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-// NVS 初始化后、Launcher 创建前调用，恢复整机设置并立即应用。
+// Call after NVS init and before Launcher creation: restore device-wide settings and apply them immediately.
 void settings_bootstrap(void);
 void settings_tick(void);
 

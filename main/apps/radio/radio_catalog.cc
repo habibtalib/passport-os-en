@@ -35,6 +35,8 @@ struct CityTranslation {
 };
 
 // Source-generated prefecture names plus common IP-provider spellings.
+// The Chinese names below are data keys (radio-directory search terms and
+// matching against IP-geolocation results), not UI text; do not translate them.
 constexpr CityTranslation kChineseCities[] = {
 #include "radio_cities.inc"
     {"Guangzhou", "广州", "广东"}, {"Hohhot", "呼和浩特", "内蒙古"},
@@ -431,7 +433,7 @@ std::size_t discover_for_location(RadioStation *stations, std::size_t capacity,
     if (city) {
         copy_text(location->search_city, sizeof(location->search_city), city->chinese);
         if (!location->region[0]) copy_text(location->region, sizeof(location->region), city->province);
-        if (same_name(location->city, city->english)) copy_text(location->city, sizeof(location->city), city->chinese);
+        // English edition: keep location->city in English for display; search_city carries the Chinese query term.
     }
     const Province *province = find_province(location->region);
     if (province) copy_text(location->region, sizeof(location->region), province->chinese);
@@ -444,17 +446,17 @@ std::size_t discover_for_location(RadioStation *stations, std::size_t capacity,
     const DirectoryServers servers = directory_servers(stop);
     std::size_t count = 0;
     const char *query = location->search_city[0] ? location->search_city : location->city;
-    query_directory(servers, *location, "name", query, "当地电台 · 网络直播", stations, capacity, count, stop);
+    query_directory(servers, *location, "name", query, "Local radio · Live stream", stations, capacity, count, stop);
     if (province && count < capacity && !same_name(query, province->chinese)) {
         // Most Chinese stations put the province in their name, not state metadata.
-        query_directory(servers, *location, "name", province->chinese, "省内电台 · 网络直播",
+        query_directory(servers, *location, "name", province->chinese, "Provincial radio · Live stream",
                         stations, capacity, count, stop);
     }
     if (province && count < capacity) {
-        query_directory(servers, *location, "state", province->english, "省内电台 · 网络直播",
+        query_directory(servers, *location, "state", province->english, "Provincial radio · Live stream",
                         stations, capacity, count, stop);
     } else if (location->region[0] && count < capacity) {
-        query_directory(servers, *location, "state", location->region, "地区电台 · 网络直播",
+        query_directory(servers, *location, "state", location->region, "Regional radio · Live stream",
                         stations, capacity, count, stop);
     }
     if (cancelled(stop)) return 0;
@@ -474,7 +476,10 @@ std::size_t radio_catalog_discover(RadioStation *stations, std::size_t capacity,
     if (!locate(location, stop)) {
         if (cancelled(stop)) return 0;
         copy_text(location->country_code, sizeof(location->country_code), "CN");
-        copy_text(location->city, sizeof(location->city), "推荐电台");
+        copy_text(location->city, sizeof(location->city), "Featured");
+        // Display "Featured", but keep the original directory query term so the
+        // name search behaves as before (an English word would match unrelated stations).
+        copy_text(location->search_city, sizeof(location->search_city), "推荐电台");
     }
     return discover_for_location(stations, capacity, location, stop);
 }

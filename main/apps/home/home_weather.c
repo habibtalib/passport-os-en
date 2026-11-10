@@ -19,9 +19,9 @@
 static const char *TAG = "home_weather";
 
 #define NVS_NAMESPACE "home_profile"
-#define RESPONSE_MAX 1024 /* forecast?current= 响应 < 500B,留余量 */
+#define RESPONSE_MAX 1024 /* forecast?current= response < 500B, with headroom */
 #define HTTP_TIMEOUT_MS 15000
-#define EPOCH_VALID_MIN 1700000000LL /* 与 home_clock 一致:早于此视为未校时 */
+#define EPOCH_VALID_MIN 1700000000LL /* same as home_clock: anything earlier counts as unsynced */
 
 static home_weather_t s_weather;
 static uint32_t s_version;
@@ -131,26 +131,26 @@ uint32_t home_weather_version(void) {
 }
 
 const char *home_weather_code_text(uint16_t code) {
-    // 短语只由 buddy 字体已有的字组成(雨雪雾雷冰雹晴阴多云大小中等均已验证)
-    if (code == 0 || code == 1) return "晴";
-    if (code == 2) return "多云";
-    if (code == 3) return "阴";
-    if (code == 45 || code == 48) return "雾";
-    if (code >= 51 && code <= 55) return "毛毛雨";
-    if (code == 56 || code == 57) return "冻雨";
-    if (code == 61) return "小雨";
-    if (code == 63) return "中雨";
-    if (code == 65) return "大雨";
-    if (code == 66 || code == 67) return "冻雨";
-    if (code == 71 || code == 77) return "小雪";
-    if (code == 73) return "中雪";
-    if (code == 75) return "大雪";
-    if (code == 80 || code == 81) return "阵雨";
-    if (code == 82) return "强阵雨";
-    if (code == 85 || code == 86) return "阵雪";
-    if (code == 95) return "雷雨";
-    if (code == 96 || code == 99) return "雷雨冰雹";
-    return "未知";
+    // Phrases are short ASCII (<= ~50 px in buddy_font_16) so they fit the 52 px weather label.
+    if (code == 0 || code == 1) return "Clear";
+    if (code == 2) return "Cloud";
+    if (code == 3) return "Gray";
+    if (code == 45 || code == 48) return "Fog";
+    if (code >= 51 && code <= 55) return "Drizzle";
+    if (code == 56 || code == 57) return "Sleet";
+    if (code == 61) return "Lt rain";
+    if (code == 63) return "Rain";
+    if (code == 65) return "Hvy rn";
+    if (code == 66 || code == 67) return "Sleet";
+    if (code == 71 || code == 77) return "Flurry";
+    if (code == 73) return "Snow";
+    if (code == 75) return "Blizz";
+    if (code == 80 || code == 81) return "Shwrs";
+    if (code == 82) return "Pour";
+    if (code == 85 || code == 86) return "Flurry";
+    if (code == 95) return "Storm";
+    if (code == 96 || code == 99) return "Hail";
+    return "N/A";
 }
 
 static void persist_cache(const home_weather_t *weather, const char *lat, const char *lon) {
@@ -169,7 +169,7 @@ static void persist_cache(const home_weather_t *weather, const char *lat, const 
     nvs_close(handle);
 }
 
-// 蒲福风级:km/h → 0..12 级,阈值来自国标蒲福风级表。
+// Beaufort scale: km/h -> level 0..12, thresholds from the standard Beaufort table.
 int home_weather_beaufort(uint8_t wind_kmh) {
     static const uint8_t kThresh[] = {1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118};
     int level = 0;
@@ -177,11 +177,11 @@ int home_weather_beaufort(uint8_t wind_kmh) {
     return level;
 }
 
-// 风向 16 点位就近归到 8 方位(北=0°,顺时针)。字形 东南西北风无 均在 buddy 字库内。
+// Wind direction snapped to the nearest of 8 compass points (north=0 deg, clockwise).
 const char *home_weather_wind_dir_text(uint16_t deg) {
     static const char *kDirs[8] = {
-        "北风", "东北风", "东风", "东南风",
-        "南风", "西南风", "西风", "西北风",
+        "N", "NE", "E", "SE",
+        "S", "SW", "W", "NW",
     };
     return kDirs[((deg + 23) % 360) / 45];
 }
@@ -189,18 +189,18 @@ const char *home_weather_wind_dir_text(uint16_t deg) {
 void home_weather_age_text(uint32_t updated_at, int64_t now, char *out, size_t capacity) {
     if (!out || !capacity) return;
     if (updated_at < EPOCH_VALID_MIN || now < EPOCH_VALID_MIN) {
-        snprintf(out, capacity, "离线数据");
+        snprintf(out, capacity, "Offline");
         return;
     }
     const int64_t age = now > (int64_t)updated_at ? now - (int64_t)updated_at : 0;
-    if (age < 120) snprintf(out, capacity, "刚刚");
-    else if (age < 3600) snprintf(out, capacity, "%d分钟前", (int)(age / 60));
-    else if (age < 86400) snprintf(out, capacity, "%d小时前", (int)(age / 3600));
-    else snprintf(out, capacity, "%d天前", (int)(age / 86400 > 99 ? 99 : age / 86400));
+    if (age < 120) snprintf(out, capacity, "Just now");
+    else if (age < 3600) snprintf(out, capacity, "%dm ago", (int)(age / 60));
+    else if (age < 86400) snprintf(out, capacity, "%dh ago", (int)(age / 3600));
+    else snprintf(out, capacity, "%dd ago", (int)(age / 86400 > 99 ? 99 : age / 86400));
 }
 
-// 坐标所在地的 UTC 偏移(timezone=auto 时返回,含夏令时):设备时区跟着城市走,
-// 出国或跨时区不用再手动改。只接受 15 分钟整倍数的合理值。
+// UTC offset of the coordinate location (returned with timezone=auto, incl. DST): the device timezone follows the city,
+// so no manual change is needed when travelling abroad or across timezones. Only sane multiples of 15 minutes are accepted.
 static void apply_utc_offset(const cJSON *root) {
     const cJSON *offset = cJSON_GetObjectItemCaseSensitive(root, "utc_offset_seconds");
     if (!cJSON_IsNumber(offset) || !isfinite(offset->valuedouble)) return;
@@ -211,7 +211,7 @@ static void apply_utc_offset(const cJSON *root) {
     time_sync_set_tz_offset_min(seconds / 60);
 }
 
-// Open-Meteo current 响应形如
+// An Open-Meteo current response looks like
 // {"latitude":39.9,"current_units":{...},"current":{"time":"...","temperature_2m":26.1,"weather_code":2,...}}
 static esp_err_t weather_parse(const char *body, const char *lat, const char *lon) {
     cJSON *root = cJSON_Parse(body);
@@ -301,7 +301,7 @@ static esp_err_t fetch_current(const char *url, const char *lat, const char *lon
     esp_http_client_config_t config = {
         .url = url,
         .timeout_ms = 2000, /* connection poll; shortened to 500ms after TLS */
-        .buffer_size = 1024, /* TLS 接收缓冲,小内存约束 */
+        .buffer_size = 1024, /* TLS receive buffer, small-memory constraint */
         .buffer_size_tx = 512,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = receive_current,

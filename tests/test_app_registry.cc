@@ -143,7 +143,7 @@ int main(){
  try{app_registry_switch_to(APP_ID_XIAOZHI);assert(false);}catch(const MockRestart&){}
  assert(mock_restarts==1&&stops==clean_stops+1);
  // The panel explains the restart instead of freezing on the old app.
- assert(!std::strcmp(mock_notice,"正在整理内存\n马上打开 test")&&!s_building_target&&!mock_timer.paused);
+ assert(!std::strcmp(mock_notice,"Freeing memory\nOpening test soon")&&!s_building_target&&!mock_timer.paused);
  // Only a software reset with an intact record is honoured, and only once.
  mock_reset_reason=ESP_RST_SW;assert(app_registry_take_clean_launch()==APP_ID_XIAOZHI);
  assert(app_registry_take_clean_launch()==APP_ID_COUNT);

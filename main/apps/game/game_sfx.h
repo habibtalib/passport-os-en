@@ -1,13 +1,13 @@
-// 《你在狗叫什么》音效(game_sfx):16kHz 方波,复用 bsp_audio 的 TX 通道。
+// "Bark Battle" sound effects (game_sfx): 16kHz square wave, reuses the bsp_audio TX channel.
 //
-// 为什么单独一个模块而不是复用 apps/voice 的 app_sound:
-//   app_sound 依赖 voice 的 app_events/app_types,并且会再跑一次 bsp_audio_init
-//   + set_format —— 与采音任务并发 open/close codec 有竞态。本模块只做
-//   bsp_audio_write(codec 已由采音任务打开,全双工,TX/RX 是两条独立 I2S
-//   handle),codec 没就绪时静默跳过,绝不反向驱动 codec 状态。
+// Why a separate module instead of reusing app_sound from apps/voice:
+//   app_sound depends on the voice app_events/app_types, and it runs bsp_audio_init
+//   + set_format again -- opening/closing the codec concurrently with the mic task races.
+//   This module only does bsp_audio_write (the codec is already opened by the mic task;
+//   full duplex, TX/RX are two independent I2S handles) and skips silently when the codec
 //
-// 成本:一个 2KB 栈的静态优先级任务,只在游戏前台存在;播放请求走任务通知,
-// 不占队列 RAM,也不会阻塞 LVGL 主循环(否则 60ms 的方波 = 掉 2 帧)。
+// Cost: one static-priority task with a 2KB stack, alive only while the game is in the
+// foreground; play requests use task notifications, no queue RAM, and never block the LVGL main loop (a 60ms square wave would drop 2 frames).
 #pragma once
 
 #include <stdint.h>
@@ -19,21 +19,21 @@ extern "C" {
 
 typedef enum {
     GS_NONE = 0,
-    GS_START,   /* 开局:短促上扬 */
-    GS_SCORE,   /* 过一根管道:清脆一声 */
-    GS_DEAD,    /* 死亡:下行两音 */
-    GS_BEST,    /* 破纪录:三音上行小号 */
+    GS_START,   /* game start: short rising blip */
+    GS_SCORE,   /* passed a pipe: one crisp beep */
+    GS_DEAD,    /* death: two descending tones */
+    GS_BEST,    /* new best: three-tone rising fanfare */
     GS_COUNT,
 } game_sfx_t;
 
-// 建播放任务(幂等)。失败只影响音效,不影响玩法。
+// Create the playback task (idempotent). Failure only affects sound, not gameplay.
 void game_sfx_start(void);
 
-// 删播放任务(幂等)。退出游戏时调用,回收栈。
+// Delete the playback task (idempotent). Called on game exit to reclaim the stack.
 void game_sfx_stop(void);
 bool game_sfx_prepare_stop(void);
 
-// 异步请求播放一个音;未启动/队列忙时静默丢弃(音效永远不能拖慢主循环)。
+// Request one tone asynchronously; silently dropped if not started/busy (sound must never slow the main loop).
 void game_sfx_play(game_sfx_t id);
 
 #ifdef __cplusplus

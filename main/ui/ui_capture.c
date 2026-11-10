@@ -9,8 +9,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
-// 只挑需要的私有头，不要图省事 include "lvgl_private.h" —— 它会把
-// rlottie/ffmpeg/lottie 的私有头一起拉进来，那些依赖外部库头，编不过。
+// Pull in only the private headers needed; do not take the shortcut of including "lvgl_private.h" - it
+// drags in the private headers of rlottie/ffmpeg/lottie, which depend on external library headers and will not compile.
 #include "src/display/lv_display_private.h"
 #include "src/core/lv_refr_private.h"
 #include "src/core/lv_obj_draw_private.h"
@@ -21,14 +21,14 @@ static const char *TAG = "uicap";
 
 #define SHOT_W 240
 #define SHOT_H 320
-#define HEX_PER_LINE 120 /* 每行 120 字节 -> 240 个 hex 字符 */
+#define HEX_PER_LINE 120 /* 120 bytes per line -> 240 hex chars */
 
 static const char kHexDigits[] = "0123456789abcdef";
 
 /**
- * 把 [y0, y0+rows) 这条横带渲染进 draw_buf。
- * 与 lv_snapshot_take_to_draw_buf() 的核心区别：buf_area / _clip_area 不是整屏，
- * 而是这条带子 —— 于是 15KB 的缓冲就能"分批"拿到整屏内容。
+ * Render the band [y0, y0+rows) into draw_buf.
+ * Key difference from lv_snapshot_take_to_draw_buf(): buf_area / _clip_area is not the whole screen
+ * but this band - so a 15KB buffer can fetch the whole screen "in batches".
  */
 static void render_band(lv_display_t *disp, lv_obj_t *scr, lv_draw_buf_t *db,
                         int32_t y0, int32_t rows) {
@@ -123,7 +123,7 @@ void ui_capture_dump_hex(void) {
              (int)rows, (unsigned)esp_get_free_heap_size(),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
 
-    // 先排一次布局，避免截到上一次 layout 未更新的中间态。
+    // Run layout once first to avoid capturing an intermediate state from a stale layout.
     lv_obj_update_layout(scr);
 
     printf("--SHOT-BEGIN %d %d--\n", SHOT_W, SHOT_H);
@@ -141,7 +141,7 @@ void ui_capture_dump_hex(void) {
         }
         render_band(disp, scr, &db, y, r);
         dump_hex(buf, stride * (size_t)r, &line_idx);
-        vTaskDelay(1);  // 别把 USB CDC 与其它任务饿死
+        vTaskDelay(1);  // Do not starve USB CDC and other tasks
     }
     printf("--SHOT-END lines=%u--\n", (unsigned)line_idx);
     fflush(stdout);

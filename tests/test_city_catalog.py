@@ -21,8 +21,8 @@ glyphs = {int(c,16) for c in re.findall(r'/\* U\+([0-9A-Fa-f]{4,6})',
                                      (ROOT/'main/fonts/buddy_font_16.c').read_text('utf-8'))}
 missing = {c for r in rows for c in r[1]+r[4]+r[5] if ord(c) not in glyphs}
 assert not missing, f'missing city glyphs: {missing}'
-zhuhai = next(r for r in rows if r[1]=='珠海' and r[4]=='广东')
-assert zhuhai[2:4] == [22.2707,113.5767] and zhuhai[5]=='珠海'
-chongqing = next(r for r in rows if r[1]=='重庆')
+zhuhai = next(r for r in rows if r[1]=='Zhuhai' and r[4]=='Guangdong')
+assert zhuhai[2:4] == [22.2707,113.5767] and zhuhai[5]=='珠海'  # parent city stays Chinese: radio-directory search key
+chongqing = next(r for r in rows if r[1]=='Chongqing')
 assert chongqing[2:4] == [29.563,106.5516]
 print(f'Offline catalog: {len(rows)} places, all coordinates/ids/profile bounds and city glyphs: PASS')

@@ -85,7 +85,7 @@ int main() {
     const Event hello{EvType::HelloOk,State::Idle,{}};
     session_allocation_ok=false;handle_proto_event(hello);
     assert(!s_session_ready && s_audio_recovery_required && s_reconnect_at_ms>mock_time);
-    on_state_changed(proto().GetState());assert(status=="音频内存不足，自动重试");
+    on_state_changed(proto().GetState());assert(status=="Audio out of memory, auto retry");
     do_start_listen();assert(record_starts==1);
     session_allocation_ok=true;connected(false);handle_proto_event(hello);
     assert(s_session_ready);
@@ -104,7 +104,7 @@ int main() {
     s_cfg_valid=true;s_cfg_fetched_ms=mock_time;s_cfg_url="wss://mock";
     audio_init_ok=false;do_connect();
     assert(!s_audio_ready && !s_session_ready);
-    assert(status=="音频启动失败，自动重试" && s_reconnect_at_ms>mock_time);
+    assert(status=="Audio start failed, auto retry" && s_reconnect_at_ms>mock_time);
     audio_init_ok=true;mock_time=s_reconnect_at_ms+1;tick();
     Cmd retry;assert(xQueueReceive(s_cmd_q,&retry,0));assert(retry==Cmd::Connect);
     handle_cmd(retry);assert(s_audio_ready && s_connect_pending && proto().IsConnected());
@@ -180,7 +180,7 @@ int main() {
     assert(xiaozhi_app_prepare_stop());
     // Failed startup remains a usable retry page, rather than a frozen old UI.
     s_ctl_task=nullptr;s_app_active=false;mock_task_fail=true;
-    xiaozhi_app_start();assert(s_start_failed&&!s_control_running&&status=="启动失败，请重试");
+    xiaozhi_app_start();assert(s_start_failed&&!s_control_running&&status=="Start failed, retry");
     mock_task_fail=false;xiaozhi_app_on_key(BSP_BTN_OK,BTN_EVT_CLICK,0);
     assert(!s_start_failed&&s_control_running&&s_app_active);
     s_control_running=false;s_app_active=false;s_ctl_task=nullptr;mock_pending_task=nullptr;

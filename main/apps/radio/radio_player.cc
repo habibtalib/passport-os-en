@@ -281,7 +281,7 @@ StreamResult stream_station(std::size_t station, uint32_t generation) {
         ESP_LOGE(kTag, "Station %u has no stream URL", static_cast<unsigned>(station));
         return StreamResult::Failed;
     }
-    radio_ui_set_playback(RadioPlaybackState::Connecting, "正在连接电台");
+    radio_ui_set_playback(RadioPlaybackState::Connecting, "Connecting station");
 
     struct Request { uint32_t generation; std::size_t station; std::atomic<bool> stop{false}; } request{generation, station};
     // Use the unused auxiliary tail rather than fragment AAC's large heap block.
@@ -323,7 +323,7 @@ StreamResult stream_station(std::size_t station, uint32_t generation) {
             (unsigned)capacity, (unsigned)(capacity * 3 / 4), (unsigned)source.icy_interval(),
             (unsigned)esp_get_free_heap_size());
 
-        radio_ui_set_playback(RadioPlaybackState::Buffering, "正在缓冲");
+        radio_ui_set_playback(RadioPlaybackState::Buffering, "Buffering");
         bool decode_failed = false;
         bool format_ready = false;
         bool showing_playing = false;
@@ -348,7 +348,7 @@ StreamResult stream_station(std::size_t station, uint32_t generation) {
                 buffering = true;
                 ++refills;
                 showing_playing = false;
-                radio_ui_set_playback(RadioPlaybackState::Buffering, "正在缓冲");
+                radio_ui_set_playback(RadioPlaybackState::Buffering, "Buffering");
                 continue;
             }
 
@@ -435,7 +435,7 @@ StreamResult stream_station(std::size_t station, uint32_t generation) {
                         if (!showing_playing) {
                             played_audio = true;
                             showing_playing = true;
-                            radio_ui_set_playback(RadioPlaybackState::Playing, "正在播放");
+                            radio_ui_set_playback(RadioPlaybackState::Playing, "Playing");
                         }
                     }
                 }
@@ -483,7 +483,7 @@ void player_task(void *) {
     while (!s_shutdown_requested.load(std::memory_order_acquire)) {
         if (!s_network_connected.load(std::memory_order_acquire)) {
             if (!reported_no_network) {
-                radio_ui_set_playback(RadioPlaybackState::Stopped, "等待网络");
+                radio_ui_set_playback(RadioPlaybackState::Stopped, "Waiting for network");
                 reported_no_network = true;
             }
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -493,7 +493,7 @@ void player_task(void *) {
 
         if (!s_wanted_playing.load(std::memory_order_acquire)) {
             if (!reported_paused) {
-                radio_ui_set_playback(RadioPlaybackState::Stopped, "已暂停");
+                radio_ui_set_playback(RadioPlaybackState::Stopped, "Paused");
                 reported_paused = true;
             }
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -519,7 +519,7 @@ void player_task(void *) {
             ESP_LOGW(kTag, "Radio paused for memory; retrying station %u later",
                      static_cast<unsigned>(station));
             radio_ui_set_playback(RadioPlaybackState::Reconnecting,
-                                  "内存不足，稍后重试");
+                                  "Low memory, retry later");
             for (unsigned i = 0; i < 100 && request_still_current(generation, station); ++i) {
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
@@ -532,7 +532,7 @@ void player_task(void *) {
             failed_attempts = 0;
             auto_skips = 0;
             radio_ui_set_playback(RadioPlaybackState::Reconnecting,
-                                  "信号中断，正在重连");
+                                  "Signal lost, reconnecting");
             for (unsigned i = 0; i < 12 && !s_shutdown_requested.load(); ++i) {
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
@@ -547,7 +547,7 @@ void player_task(void *) {
             ESP_LOGW(kTag, "Station %u unreachable, skipping to the next one",
                      static_cast<unsigned>(station));
             radio_ui_set_playback(RadioPlaybackState::Error,
-                                  "电台无法播放 已换台");
+                                  "Station failed, switched");
             for (unsigned i = 0; i < 12 && !s_shutdown_requested.load(); ++i) {
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
@@ -561,7 +561,7 @@ void player_task(void *) {
         // Still retrying on its own: show progress, not a dead end.
         const bool network_suspect = auto_skips >= kMaxAutoSkips;
         radio_ui_set_playback(RadioPlaybackState::Reconnecting,
-                              network_suspect ? "网络无法访问电台，重试中" : "连接失败，正在重试");
+                              network_suspect ? "Cannot reach station, retrying" : "Connect failed, retrying");
         for (unsigned i = 0; i < (network_suspect ? 60u : 25u) && request_still_current(generation, station); ++i) {
             vTaskDelay(pdMS_TO_TICKS(100));
         }
@@ -709,7 +709,7 @@ void radio_player_toggle() {
 void radio_player_set_playing(bool playing) {
     s_wanted_playing.store(playing, std::memory_order_release);
     s_generation.fetch_add(1, std::memory_order_acq_rel);
-    if (!playing) radio_ui_set_playback(RadioPlaybackState::Stopped, "已暂停");
+    if (!playing) radio_ui_set_playback(RadioPlaybackState::Stopped, "Paused");
 }
 
 bool radio_player_is_playing() {
@@ -741,7 +741,7 @@ void radio_player_set_station(std::size_t index) {
     save_station_name(chosen.name);
     radio_ui_set_station(index, radio_player_station_count(), radio_player_station(index));
     if (radio_player_is_playing()) {
-        radio_ui_set_playback(RadioPlaybackState::Connecting, "正在切换电台");
+        radio_ui_set_playback(RadioPlaybackState::Connecting, "Switching station");
     }
 }
 

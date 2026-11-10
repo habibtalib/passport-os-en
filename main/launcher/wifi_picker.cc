@@ -37,7 +37,7 @@ void draw() {
         case Page::Keyboard:
             radio_ui_show_wifi_keyboard(p.ssid.c_str(), p.password.size(), p.keyboard, p.selected, p.error); break;
         case Page::Connecting:
-            radio_ui_show_wifi_connecting(p.ssid.c_str(), "正在连接，请稍等"); break;
+            radio_ui_show_wifi_connecting(p.ssid.c_str(), "Connecting, please wait"); break;
         case Page::Success:
             radio_ui_show_wifi_success(p.ssid.c_str()); break;
         case Page::Saved: {
@@ -66,7 +66,7 @@ void refresh_scan() {
         std::memcpy(item.ssid, ap.ssid, 32); item.rssi = ap.rssi; item.secure = ap.authmode != WIFI_AUTH_OPEN;
         p.networks.push_back(item);
     }
-    for (const char *text : {"已存网络", "返回"}) {
+    for (const char *text : {"Saved Networks", "Back"}) {
         WifiNetworkView item{}; item.rssi = -128; std::snprintf(item.ssid, sizeof(item.ssid), "%s", text);
         p.networks.push_back(item);
     }
@@ -77,7 +77,7 @@ void refresh_scan() {
 
 void connect() {
     auto &p = *s_picker;
-    if (p.secure && p.password.size() < 8) { p.error = "密码至少 8 位"; draw(); return; }
+    if (p.secure && p.password.size() < 8) { p.error = "Password: 8+ characters"; draw(); return; }
     p.page = Page::Connecting; p.result = 1; draw();
     if (xTaskCreate([](void *arg) {
         auto *p = static_cast<Picker *>(arg);
@@ -105,7 +105,7 @@ bool wifi_picker_open() {
         else {
             const int reason = WifiManager::GetInstance().LastConfigDisconnectReason();
             p.error = reason == WIFI_REASON_AUTH_FAIL || reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || reason == WIFI_REASON_HANDSHAKE_TIMEOUT
-                ? "密码错误，请修改" : reason == WIFI_REASON_NO_AP_FOUND ? "未找到网络，请重试" : "连接超时，请重试";
+                ? "Wrong password, edit it" : reason == WIFI_REASON_NO_AP_FOUND ? "Network not found, retry" : "Timed out, please retry";
             p.page = Page::Keyboard; p.selected = 0;
         }
         draw();

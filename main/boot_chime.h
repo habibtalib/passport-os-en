@@ -1,6 +1,6 @@
-// 首页个人资料之外的开机彩蛋:复古 8-bit 开机音(E5-G5-B5-E6 方波琶音)。
-// 纯程序合成,无音频素材;专用短命任务里播放,播完立即 bsp_audio_deinit
-// 把 codec/DMA 内存还给系统 —— 开机只借不占。
+// Boot Easter egg beyond the Home profile: retro 8-bit boot sound (E5-G5-B5-E6 square-wave arpeggio).
+// Purely synthesized, no audio assets; plays in a dedicated short-lived task and calls bsp_audio_deinit right after playback,
+// returning codec/DMA memory to the system - boot only borrows it, never holds it.
 #pragma once
 #include <stdbool.h>
 
@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-// 创建一次性任务播放开机音(异步,不阻塞启动流程)。重复调用无害。
+// Create a one-shot task to play the boot sound (async, does not block startup). Repeated calls are harmless.
 void boot_chime_start(void);
 bool boot_chime_busy(void);
 

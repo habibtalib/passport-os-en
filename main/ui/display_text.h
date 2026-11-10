@@ -9,8 +9,8 @@ namespace passport {
 // fold full-width forms to ASCII, keeping the CJK punctuation the font has.
 inline bool display_keeps_fullwidth(uint32_t cp) {
     switch (cp) {
-    case 0xFF01: case 0xFF08: case 0xFF09: case 0xFF0C:   // ！（），
-    case 0xFF1A: case 0xFF1B: case 0xFF1F: case 0xFF5E:   // ：；？～
+    case 0xFF01: case 0xFF08: case 0xFF09: case 0xFF0C:   // full-width ! ( ) ,
+    case 0xFF1A: case 0xFF1B: case 0xFF1F: case 0xFF5E:   // full-width : ; ? ~
         return true;
     default:
         return false;

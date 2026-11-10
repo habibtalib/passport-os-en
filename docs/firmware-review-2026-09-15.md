@@ -1,5 +1,3 @@
-[简体中文](firmware-review-2026-09-15.zh_CN.md) · English
-
 # Passport OS firmware review, 2026-09-15
 
 Base: `manchunx7-bit/passport-os`, `main`, `e5dd58223d62c2be5de6ffcb370b0fcb7b04b11d`.

@@ -28,7 +28,7 @@ namespace {
 
 std::atomic<bool> s_voice_active{false};
 std::atomic<bool> s_voice_ui_ready{false};
-// UI 存活开关:stop() 里先置 false 再删界面,避免超时未退出的任务继续渲染。
+// UI alive flag: stop() sets it false first and then deletes the UI, so a task that has not exited in time does not keep rendering.
 std::atomic<bool> s_voice_ui_alive{false};
 std::atomic<bool> s_voice_transport_done{false};
 std::atomic<bool> s_voice_transport_failed{false};
@@ -37,11 +37,11 @@ app_state_t s_voice_state;
 bool s_voice_ui_initialized = false;
 uint32_t s_last_drop_count = 0;
 
-// 2026-09-12:通道由 BLE 换成 Wi-Fi UDP 后,这里原本的 suspend_wifi_driver() /
-// resume_wifi_driver()(进语音 StopStation + esp_wifi_deinit 给 NimBLE 腾内存,
-// 退出再重建)整块删除 —— 这正是本次改造要消灭的代价:以前进一次语音,
-// 天气/时间/上传全断,退出还要重连。现在 Wi-Fi 常驻,语音只是多占一个 UDP 端口。
-// 详见 docs/voice-udp-channel.md。
+// 2026-09-12: after the channel moved from BLE to Wi-Fi UDP, the suspend_wifi_driver() /
+// resume_wifi_driver() that used to be here (enter voice: StopStation + esp_wifi_deinit to free memory for NimBLE,
+// rebuild on exit) were removed wholesale -- that is exactly the cost this rework set out to eliminate: entering voice used to
+// cut off weather/time/upload entirely and exiting required reconnecting. Now Wi-Fi stays up and voice just takes one more UDP port.
+// See docs/voice-udp-channel.md.
 
 void run_voice_actions(const app_action_t *acts, uint8_t n) {
     for (uint8_t i = 0; i < n; i++) {
@@ -165,12 +165,12 @@ void voice_worker_task(void *arg) {
             }
         }
 
-        // 链路对账:通道换成 Wi-Fi UDP 后没有"连接回调"(BLE 栈在特征订阅
-        // 完成时才投 APP_EV_LINK_UP,迁移后全仓零生产者),状态机的
-        // link_up 只能靠这里对账 —— 每轮(~10ms)比对 mode_link_up() 与
-        // link_up,翻转即补投对应事件,复用状态机现成的 CONNECTED /
-        // DISCONNECTED 处理(横幅显隐、PTT 门禁、断链收束会话)。UDP 层
-        // peer_fresh 自带 3s 迟滞,不会抖动翻转。
+        // Link reconciliation: after the channel moved to Wi-Fi UDP there is no "connect callback" (the BLE stack only posted
+        // APP_EV_LINK_UP once characteristic subscription completed; after the migration the whole repo has zero producers),
+        // so the state machine's link_up can only be reconciled here -- every round (~10ms) compare mode_link_up() with
+        // link_up, and on a flip post the matching event, reusing the state machine's existing CONNECTED /
+        // DISCONNECTED handling (banner show/hide, PTT gate, wrap up the session on link loss). The UDP layer's
+        // peer_fresh has a built-in 3s hysteresis, so it does not flap.
         const bool link_now = mode_link_up();
         if (link_now != s_voice_state.link_up) {
             app_event_t link_ev{};
@@ -183,7 +183,7 @@ void voice_worker_task(void *arg) {
         bool state_changed = (s_voice_state.state != last_state);
         bool recording = (s_voice_state.state == APP_ST_LISTENING);
         if (recording) {
-            app_registry_keep_awake(); /* 录音与语音对话进行中持续抑制息屏，避免中断长对话流程 */
+            app_registry_keep_awake(); /* keep suppressing screen-off while recording and voice dialogue are in progress, so long conversations are not interrupted */
         }
         bool time_to_tick = (now_ms - last_render_ms >= (recording ? 200 : 500));
 
@@ -214,7 +214,7 @@ void voice_worker_task(void *arg) {
             }
         }
 
-        // 强制让出 CPU，确保 IDLE 任务能运行，防止 Task Watchdog 触发
+        // Force a CPU yield so the IDLE task can run, preventing the Task Watchdog from firing
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
@@ -255,15 +255,15 @@ void voice_app_start(void) {
     s_voice_active.store(true);
     s_voice_ui_alive.store(true);
 
-    // Wi-Fi 常驻:语音通道就是 Wi-Fi UDP,刻意不再停 Wi-Fi。
-    // 原实现这里是 suspend_wifi_driver()(给 NimBLE 腾内存),已随 BLE 一起删除
-    // —— 见 docs/voice-udp-channel.md。
+    // Wi-Fi stays up: the voice channel is Wi-Fi UDP, so Wi-Fi is deliberately no longer stopped.
+    // The original implementation here was suspend_wifi_driver() (freeing memory for NimBLE), removed together with BLE
+    // -- see docs/voice-udp-channel.md.
 
     s_voice_ui_ready.store(false);
     s_voice_transport_done.store(false);
     s_voice_transport_failed.store(false);
 
-    // 1. 先在自己的大栈上把 UI 建好,再把运行时缓冲交给传输层。
+    // 1. Build the UI on our own large stack first, then hand the runtime buffers to the transport layer.
     if (s_voice_task_handle == nullptr) {
         if (xTaskCreate(voice_worker_task, "voice_task", 8192, NULL, 4,
                         &s_voice_task_handle) != pdPASS) {
@@ -281,7 +281,7 @@ void voice_app_start(void) {
     if (!s_voice_ui_ready.load()) {
         ESP_LOGE(TAG, "Voice UI initialization timed out");
         s_voice_active.store(false);
-        int w = 0;   // C3:有上界,绝不在 stop 路径上无限等
+        int w = 0;   // C3: bounded, never wait forever on the stop path
         while (s_voice_task_handle != nullptr && w < 2000) {
             vTaskDelay(pdMS_TO_TICKS(10));
             w += 10;
@@ -308,8 +308,8 @@ void voice_app_stop(void) {
     ESP_LOGI(TAG, "Stopping Voice App and releasing UDP/Audio streamer...");
     s_voice_active.store(false);
 
-    // 3. 等待主任务退出(2026-09-13 修复 C3:加 2s 上界 + 先撤 UI 开关,
-    //    原来是无上界 while,跑在 input_task 里,卡住就是按键全失灵)
+    // 3. Wait for the main task to exit (2026-09-13 fix C3: add a 2s bound + withdraw the UI flag first,
+    //    it used to be an unbounded while, running in input_task, and getting stuck meant all keys stopped responding)
     s_voice_ui_alive.store(false);
     int wait_ms = 0;
     while (s_voice_task_handle != nullptr && wait_ms < 2000) {
@@ -372,10 +372,10 @@ void voice_app_on_key(uint8_t btn, app_btn_event_t event, uint16_t mv) {
 
 const passport_app_t g_voice_app = {
     .id = APP_ID_VOICE,
-    .name = "随身 AI 语音",
+    .name = "AI Voice",
     .en_name = "VOICE",
-    .desc = "按住上键说话\n文字输入到电脑光标处",
-    .tag = "需电脑",
+    .desc = "Hold Up to talk\nText goes to PC cursor",
+    .tag = "Needs PC",
     .theme_color = 0x4ED39A,
     .init = voice_app_init,
     .start = voice_app_start,

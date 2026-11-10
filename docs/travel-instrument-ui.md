@@ -2,40 +2,40 @@
 
 Base: main `d19caf6439bfa64441d458927a83fccc67526634`. The previous functional fixes remain in place. The device now keeps both refined visual directions as selectable themes.
 
-## 双主题
+## Dual themes
 
-- **经典绿磷光**：恢复上一版的近黑绿底、磷光绿文字与更明显的终端框线。
-- **复古旅行仪器**：炭黑、暖白与琥珀色，采用更开放的标题和内容排版。
-- 两套主题共用全部页面、字体、图片和显示缓冲，只保存两张十色调色板与一个当前主题值。设置中的“外观主题”可以即时切换，选择写入 NVS，重启后继续使用；恢复默认设置会回到旅行仪器。
-- 用户已在实机验证旅行仪器版本，反馈运行和显示没有问题。经典绿磷光及新增切换流程仍需在最终固件上实机复测。
+- **Classic green phosphor**: restores the previous version's near-black green background, phosphor-green text and more pronounced terminal-style borders.
+- **Retro travel instrument**: charcoal, warm white and amber, with more open title and content layout.
+- Both themes share all pages, fonts, images and display buffers. Only two ten-color palettes and one current-theme value are stored. "Appearance theme" in Settings switches themes instantly; the choice is written to NVS and persists after reboot; restoring default settings returns to the travel instrument theme.
+- The user has verified the travel instrument version on real hardware and reported no problems with operation or display. The classic green phosphor theme and the new switching flow still need to be retested on hardware with the final firmware.
 
-## 视觉规则
+## Visual rules
 
-- 炭黑 `#181B1C` 为背景，暖白 `#EEE7D6` 为正文，琥珀 `#DDB36C` 用于焦点、仪表和重点信息。灰米色用于辅助文字，柔绿只承担成功状态。
-- 标题采用开放排版和单条底线；说明文字、副标题、对话正文不使用闭合框。输入框、风险提示和实际游戏场地保留必要的边界。
-- 中文正文以现有 16px 字库为主，页面标题保留现有 20px 子集；英文和数字采用现有 Montserrat 14/20px。不引入新字体文件；点阵时钟作为唯一大号仪表例外。原有中文子集暂不强行合并，避免缺字与新增完整字库。
-- 正文字距为 0，标题字距 1px。小智长回复行距 4px、段间距 12px，避免像素字挤在一起。固定宽度的姓名和应用副标题使用省略显示。
+- Charcoal `#181B1C` is the background, warm white `#EEE7D6` is body text, and amber `#DDB36C` is used for focus, gauges and key information. Gray-beige is used for secondary text; soft green is used only for success states.
+- Titles use an open layout with a single underline; description text, subtitles and dialog body text do not use closed frames. Input fields, risk warnings and the actual game field keep the borders they need.
+- Chinese body text mainly uses the existing 16px font, and page titles keep the existing 20px subset; English and digits use the existing Montserrat 14/20px. No new font files are introduced; the dot-matrix clock is the only large-size gauge exception. The existing Chinese subsets are not forcibly merged for now, to avoid missing glyphs and a new full font.
+- Body letter spacing is 0 and title letter spacing is 1px. Long Xiaozhi AI replies use 4px line spacing and 12px paragraph spacing, so the pixel text is not crowded. Fixed-width names and app subtitles are shown with ellipsis.
 
-## 页面同步
+## Page sync
 
-| 范围 | 实现 |
+| Scope | Implementation |
 | --- | --- |
-| 启动 | PASSPORT OS / TRAVEL INSTRUMENT，保留有界标题揭示 |
-| 首页 | 通行证身份标识、照片档案、点阵时钟；资料区改为底部分隔线，缩小温度字号，旅行底图使用琥珀色；去掉重复文字阴影 |
-| 抽屉 | PASSPORT / TOOLS 目录、开放图标与标题、无框英文副标题、细页码刻线；去掉八个角括号对象 |
-| 设置 | 16px 列表正文、左侧选中标记、统一标题与操作提示 |
-| AI 语音全部状态 | 开放标题、无框内容面板，说明文字统一 16px；就绪/发送说明去框，保留风险与主要操作的强调 |
-| 小智 | 无框状态行，正文上方分隔线、加宽阅读区、增加行距与段间距 |
-| 收音机和设置/配网子页 | 统一配色，保留调谐刻度和琥珀指针；去掉通用面板框，时钟回归辅助字号，正文复用中文 16px 字库 |
-| 两个游戏 | 同步系统配色与提示，结果页上下细线，保留游戏对象的功能色；音量轨道与填充保持区分 |
-| 手机资料/配网页及成功页 | 同色系、开放标题与卡片，输入和按钮保留交互边界；使用设备本地字体，无网络字体 |
+| Boot | PASSPORT OS / TRAVEL INSTRUMENT, keeping the bounded title reveal |
+| Home | Passport identity label, photo archive, dot-matrix clock; the profile area now uses a bottom divider, the temperature font size is reduced, the travel base map uses amber; the duplicate text shadow is removed |
+| Drawer | PASSPORT / TOOLS directory, open icons and titles, frameless English subtitles, thin page tick marks; the eight corner-bracket objects are removed |
+| Settings | 16px list body text, left-side selection marker, unified title and action hints |
+| AI Voice, all states | Open title, frameless content panel, description text unified at 16px; ready/sending descriptions lose their frames, while emphasis is kept for risk warnings and primary actions |
+| Xiaozhi AI | Frameless status line, divider above the body text, widened reading area, increased line and paragraph spacing |
+| Radio and Settings/provisioning subpages | Unified colors, keeping the tuning scale and amber pointer; generic panel frames removed, the clock returns to the secondary font size, body text reuses the Chinese 16px font |
+| Two games | Synced system colors and hints, thin lines above and below the result page, functional colors of game objects kept; volume track and fill remain distinguishable |
+| Phone profile/provisioning pages and success page | Same color scheme, open titles and cards, input fields and buttons keep their interaction borders; uses device-local fonts, no web fonts |
 
-## 资源约束与验证
+## Resource constraints and verification
 
-没有新增字体位图、图片资源、全屏离屏缓冲或常驻背景动画。首页减少一个重复标签、增加一个身份标签；抽屉删除八个装饰对象、增加一个目录标签。其他页面复用现有控件，主要修改样式和布局。页面常驻对象数量没有因装饰扩张；字符串和样式属性仍可能改变少量内存占用，不能把对象数直接换算成实测堆内存收益。
+No new font bitmaps, image assets, full-screen offscreen buffers or resident background animations were added. The Home page loses one duplicate label and gains one identity label; the Drawer drops eight decorative objects and gains one directory label. Other pages reuse existing widgets, with changes mainly to styles and layout. The number of resident page objects did not grow because of decoration; strings and style attributes may still change memory usage slightly, so the object count cannot be converted directly into measured heap savings.
 
-双主题提交 `b5dd137fba4754c16c9d9a63dd1a8ab29243c323` 已通过 ESP-IDF 5.5.3 完整编译、镜像合并和分区保护校验。应用为 3,038,992 字节，相比单一旅行仪器版本增加 1,008 字节；4 MiB 应用分区仍剩约 28%。两张调色板本身占 80 字节只读数据，另有一个活动主题状态值和一个 NVS 键。不改变屏幕缓冲、硬件引脚或分区表。
+The dual-theme commit `b5dd137fba4754c16c9d9a63dd1a8ab29243c323` passed a full ESP-IDF 5.5.3 build, image merge and partition protection check. The app is 3,038,992 bytes, 1,008 bytes larger than the single travel-instrument version; about 28% of the 4 MiB app partition remains free. The two palettes themselves take 80 bytes of read-only data, plus one active-theme state value and one NVS key. The screen buffer, hardware pins and partition table are unchanged.
 
-构建与固件产物见 [GitHub Actions 34987914612](https://github.com/manchunx7-bit/passport-os/actions/runs/34987914612)。
+For the build and firmware artifacts, see [GitHub Actions 34987914612](https://github.com/manchunx7-bit/passport-os/actions/runs/34987914612).
 
-主机回归测试通过。实物验收仍需要：240×320 逐页检查长姓名/SSID/中英文混排、语音全部状态及长回复、最低亮度可读性；循环切换全部应用记录最小空闲堆与最大连续块。没有实物测量前，不宣称已验证峰值 RAM、功耗或所有页面的渲染效果。
+Host regression tests pass. Hardware acceptance still requires: page-by-page checks at 240×320 for long names/SSIDs and mixed Chinese/English text, all AI Voice states and long replies, and readability at minimum brightness; cycling through all apps while recording the minimum free heap and maximum contiguous block. Until measured on hardware, peak RAM, power consumption and the rendering of all pages are not claimed as verified.

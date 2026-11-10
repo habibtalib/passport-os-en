@@ -1,6 +1,6 @@
 // components/bsp/include/bsp_battery.h
-// CellWise CW2017 电量计:I2C 0x63,与 ES8311 共用总线。
-// BSP 写入本机优特利 520mAh 电芯的厂家 profile，芯片直接给出 SOC%。
+// CellWise CW2017 fuel gauge: I2C 0x63, shares the bus with the ES8311.
+// The BSP writes the vendor profile for this unit Yoteli 520mAh cell; the chip reports SOC% directly.
 #pragma once
 
 #include "esp_err.h"
@@ -9,8 +9,8 @@
 extern "C" {
 #endif
 
-// 初始化。内部会调 bsp_i2c_init()(幂等)。
-// 芯片不应答时返回 ESP_ERR_NOT_FOUND —— 上层可据此在 UI 上标记该项不可用。
+// Initialize. Calls bsp_i2c_init() internally (idempotent).
+// Returns ESP_ERR_NOT_FOUND if the chip does not ACK - upper layers can use this to mark the item unavailable in the UI.
 esp_err_t bsp_battery_init(void);
 
 // Cached gauge readings, refreshed every 10s by the system monitor. Invalid or
@@ -19,7 +19,7 @@ int bsp_battery_soc(void);
 void bsp_battery_poll(void);
 void bsp_battery_log_status(void);
 
-// 电池电压 mV;读失败返回 -1。
+// Battery voltage in mV; returns -1 on read failure.
 int bsp_battery_mv(void);
 
 #ifdef __cplusplus

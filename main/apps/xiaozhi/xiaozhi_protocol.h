@@ -1,18 +1,18 @@
 #pragma once
 
-// 小智 WebSocket 协议 v3 实现（对齐官方 xiaozhi-esp32 main/protocols/websocket_protocol.cc）
+// Xiaozhi WebSocket protocol v3 implementation (aligned with the official xiaozhi-esp32 main/protocols/websocket_protocol.cc)
 //
-// 线程模型（重要）：
-//   * 本类所有回调都在 esp_websocket_client 的任务上下文里同步触发。
-//   * 因此回调实现必须"只入队、不做阻塞工作"，且绝不能再调用 Stop()。
-//   * 出站发送（SendAudio / SendJson）允许从录音任务调用；esp_websocket_client
-//     内部是可重入锁，超时是有限的（见 kSendTimeoutMs），不会死锁。
+// Threading model (important):
+//   * All callbacks of this class fire synchronously in the esp_websocket_client task context.
+//   * So callback implementations must "only enqueue, never do blocking work", and must never call Stop() again.
+//   * Outbound sends (SendAudio / SendJson) may be called from the recording task; esp_websocket_client
+//     uses a reentrant lock internally and the timeout is bounded (see kSendTimeoutMs), so no deadlock.
 //
-// 与官方实现的差异（刻意的健壮性增强）：
-//   * 分片重组：官方把重组完全交给 websocket 组件；这里显式按
-//     payload_offset/payload_len 重组，op_code=0x00 续帧也参与，避免 buffer_size
-//     小于报文时 JSON 被逐片截断解析。
-//   * 未知/告警报文会回调出来，而不是静默丢弃 —— 设备屏幕能告诉用户到底怎么了。
+// Differences from the official implementation (deliberate robustness improvements):
+//   * Fragment reassembly: the official one leaves reassembly entirely to the websocket component; here it is explicit by
+//     payload_offset/payload_len, with op_code=0x00 continuation frames included, avoiding JSON being parsed piece by piece and truncated when buffer_size
+//     is smaller than the message.
+//   * Unknown/alert messages are called back instead of silently dropped -- the device screen can tell the user what went wrong.
 
 #include <cstdint>
 #include <cstddef>
@@ -28,38 +28,38 @@ namespace xiaozhi {
 enum class State {
     Disconnected,
     Connecting,
-    Idle,           // 已连上小智后台，等待用户触发对话
-    Listening,      // 用户正在对讲，录音并实时上传 Opus
-    Thinking,       // 用户停止录音，云端 STT & LLM 思考中
-    Speaking,       // 云端 TTS 正在流式下发并播放
+    Idle,           // Connected to the Xiaozhi backend, waiting for the user to start a conversation
+    Listening,      // User is talking; recording and uploading Opus in real time
+    Thinking,       // User stopped recording; cloud STT & LLM thinking
+    Speaking,       // Cloud TTS is streaming down and playing
     Error,
 };
 
-// 由 websocket 任务投递给控制任务的事件。
+// Events posted by the websocket task to the control task.
 enum class EvType : uint8_t {
     Connected,
     Disconnected,
     SocketError,
-    HelloOk,        // 服务端 hello 已收到，会话可用
-    SessionInfo,    // session_id 变化
-    StateChanged,   // 协议内部状态变化（Idle/Listening/Thinking/Speaking…）
-    UserText,       // stt（替换语义）
-    AiSentence,     // tts/sentence_start（替换语义）
+    HelloOk,        // Server hello received; session is usable
+    SessionInfo,    // session_id changed
+    StateChanged,   // Internal protocol state changed (Idle/Listening/Thinking/Speaking...)
+    UserText,       // stt (replace semantics)
+    AiSentence,     // tts/sentence_start (replace semantics)
     LlmEmotion,     // llm.emotion
-    Alert,          // 服务端告警 / 未知报文 / 激活提示
+    Alert,          // Server alert / unknown message / activation hint
     HandshakeTimeout,
 };
 
 constexpr size_t kEventTextCap = 256;
-// 报文重组缓冲按"够用"来定，不按"保险"来定：这些是静态(BSS)占用，直接等额
-// 减少本就不足 90KB 的堆。服务端的 tts/stt 正文远小于 1KB，Opus 帧约 300 字节。
-constexpr size_t kMaxTextMessage = 768;   // 单条 JSON 报文重组上限
-constexpr size_t kMaxBinaryMessage = 512;  // 单帧二进制（Opus）重组上限
+// Message reassembly buffers are sized to "enough", not to "safe": they are static (BSS) usage and directly reduce
+// the already insufficient <90KB heap by the same amount. Server tts/stt bodies are far below 1KB, and an Opus frame is about 300 bytes.
+constexpr size_t kMaxTextMessage = 768;   // Reassembly limit for one JSON message
+constexpr size_t kMaxBinaryMessage = 512;  // Reassembly limit for one binary (Opus) frame
 
 struct Event {
     EvType type;
-    State state;                 // StateChanged 时有效
-    char   text[kEventTextCap];  // NUL 结尾，超长已安全截断
+    State state;                 // Valid on StateChanged
+    char   text[kEventTextCap];  // NUL-terminated; overlong text is safely truncated
 };
 
 using EventQueue = QueueHandle_t;
@@ -69,16 +69,16 @@ public:
     Protocol();
     ~Protocol();
 
-    // url / token / version 由上层（NVS 或 OTA）给定。
+    // url / token / version are supplied by the upper layer (NVS or OTA).
     bool Start(const std::string &url, const std::string &token, int version);
 
-    // 必须在控制任务里调用；不得在回调里调用（组件会直接拒绝并返回失败）。
+    // Must be called from the control task; must not be called from a callback (the component rejects it outright and returns failure).
     void Stop();
 
     bool IsConnected() const;
-    // websocket 客户端对象当前是否存在。注意它可能"存在但未连通"：
-    // esp_websocket_client 内部会按 reconnect_timeout_ms 自行重连，
-    // 因此上层在这段时间里不应该反复重建客户端。
+    // Whether the websocket client object currently exists. Note it may be "present but not connected":
+    // esp_websocket_client reconnects by itself per reconnect_timeout_ms,
+    // so the upper layer should not repeatedly rebuild the client during that time.
     bool HasClient() const { return client_ != nullptr; }
     // A clean close/finished worker cannot auto-reconnect even with a live handle.
     bool NeedsRestart() const { return needs_restart_.load(); }
@@ -91,19 +91,19 @@ public:
     // bounded queue. Connection events use a sticky mailbox; state is polled.
     bool PopCriticalEvent(Event *out);
 
-    // 交互操作（控制任务调用）
+    // Interactive operations (called from the control task)
     bool TriggerStartListen();
     bool TriggerStopListen();
     bool TriggerAbort();
 
-    // 发送压缩后的 Opus 音频帧（录音任务调用，内部有界超时）
+    // Send a compressed Opus audio frame (called from the recording task; bounded timeout inside)
     bool SendAudio(const uint8_t *opus_data, size_t len);
 
-    // 握手是否在超时前完成
+    // Whether the handshake completed before the timeout
     bool HandshakeDone() const { return hello_ok_.load(); }
 
-    // 服务端 hello 里 audio_params.sample_rate 的值（官方实测 24000）。
-    // 播放/解码必须按它来，否则 TTS 音调和语速都会错。
+    // Value of audio_params.sample_rate in the server hello (measured 24000 on the official server).
+    // Playback/decoding must use it, otherwise TTS pitch and speed will be wrong.
     int ServerSampleRate() const { return server_sample_rate_; }
 
     static const char *StateName(State s);
@@ -116,7 +116,7 @@ private:
     void OnDisconnected();
     void OnSessionEnded();
     void HandleData(const esp_websocket_event_data_t *data);
-    void DispatchText();                                  // rx_text_ 已收全
+    void DispatchText();                                  // rx_text_ fully received
     void Publish(EvType type, const char *text, State st = State::Disconnected);
     bool SendJson(const std::string &json);
     void LoadIdentity();
@@ -136,13 +136,13 @@ private:
     std::atomic<bool> needs_restart_{false};
     int server_sample_rate_{16000};
 
-    // 文本报文重组缓冲（仅 websocket 任务访问）
+    // Text message reassembly buffer (accessed only by the websocket task)
     char   rx_text_[kMaxTextMessage];
     size_t rx_text_len_{0};
     size_t rx_text_expect_{0};
     uint8_t rx_opcode_{0};
 
-    // 二进制（Opus）报文重组缓冲（仅 websocket 任务访问）
+    // Binary (Opus) message reassembly buffer (accessed only by the websocket task)
     uint8_t rx_bin_[kMaxBinaryMessage];
     size_t  bin_len_{0};
     uint8_t bin_opcode_{0};

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Network Configuration</title>
     <meta charset="utf-8">
@@ -493,7 +493,6 @@ p{line-height:1.65}
             <option value="hu-HU">Magyar</option>
             <option value="id-ID">Bahasa Indonesia</option>
             <option value="it-IT">Italiano</option>
-            <option value="ja-JP">日本語</option>
             <option value="ko-KR">한국어</option>
             <option value="ms-MY">Bahasa Melayu</option>
             <option value="nb-NO">Norsk</option>
@@ -510,8 +509,6 @@ p{line-height:1.65}
             <option value="tr-TR">Türkçe</option>
             <option value="uk-UA">Українська</option>
             <option value="vi-VN">Tiếng Việt</option>
-            <option value="zh-CN">简体中文</option>
-            <option value="zh-TW">繁體中文</option>
             </select>
         </div>
     </header>
@@ -984,25 +981,6 @@ p{line-height:1.65}
                 save: 'Salva',
                 config_success: 'Configurazione riuscita!'
             },
-            'ja-JP': {
-                title: 'ネットワーク設定',
-                saved_wifi: '保存済みのWi-Fi',
-                new_wifi: '新しいWi-Fi',
-                password: 'パスワード:',
-                connect: '接続',
-                connecting: '接続中...',
-                select_wifi: '以下のリストから2.4G Wi-Fiを選択してください:',
-                select_wifi_5g: '以下のリストからWi-Fiを選択してください:',
-                scanning: 'スキャン中...',
-                wifi_tab: 'Wi-Fi設定',
-                advanced_tab: '詳細設定',
-                ota_url: 'カスタムOTA URL:',
-                max_tx_power: 'Wi-Fi最大送信電力:',
-                remember_bssid: 'Wi-Fi接続時にBSSIDを記憶する',
-                sleep_mode: 'スリープモードを有効にする',
-                save: '保存',
-                config_success: '設定が完了しました！'
-            },
             'ko-KR': {
                 title: '네트워크 구성',
                 saved_wifi: '저장된 Wi-Fi',
@@ -1306,44 +1284,6 @@ p{line-height:1.65}
                 sleep_mode: 'Bật chế độ ngủ',
                 save: 'Lưu',
                 config_success: 'Cấu hình thành công!'
-            },
-            'zh-CN': {
-                title: '网络配置',
-                saved_wifi: '已保存的 Wi-Fi',
-                new_wifi: '新的 Wi-Fi',
-                password: '密码:',
-                connect: '连接',
-                connecting: '正在连接...',
-                select_wifi: '从下面列表选择 2.4G Wi-Fi:',
-                select_wifi_5g: '从下面列表选择 Wi-Fi:',
-                scanning: '扫描中...',
-                wifi_tab: 'Wi-Fi 配置',
-                advanced_tab: '高级选项',
-                ota_url: '自定义 OTA 地址:',
-                max_tx_power: 'Wi-Fi 最大发射功率:',
-                remember_bssid: '连接 Wi-Fi 时记住 BSSID',
-                sleep_mode: '启用睡眠模式',
-                save: '保存',
-                config_success: '配置成功！'
-            },
-            'zh-TW': {
-                title: '網路設定',
-                saved_wifi: '已儲存的 Wi-Fi',
-                new_wifi: '新的 Wi-Fi',
-                password: '密碼:',
-                connect: '連接',
-                connecting: '正在連接...',
-                select_wifi: '從下方列表選擇 2.4G Wi-Fi:',
-                select_wifi_5g: '從下方列表選擇 Wi-Fi:',
-                scanning: '掃描中...',
-                wifi_tab: 'Wi-Fi 設定',
-                advanced_tab: '進階選項',
-                ota_url: '自定義 OTA 位址:',
-                max_tx_power: 'Wi-Fi 最大發射功率:',
-                remember_bssid: '連接 Wi-Fi 時記住 BSSID',
-                sleep_mode: '啟用睡眠模式',
-                save: '儲存',
-                config_success: '設定成功！'
             }
         };
 
@@ -1388,8 +1328,6 @@ p{line-height:1.65}
             'id': 'id-ID', 'id-ID': 'id-ID',
             // Italian
             'it': 'it-IT', 'it-IT': 'it-IT', 'it-CH': 'it-IT',
-            // Japanese
-            'ja': 'ja-JP', 'ja-JP': 'ja-JP',
             // Korean
             'ko': 'ko-KR', 'ko-KR': 'ko-KR',
             // Malay
@@ -1422,8 +1360,6 @@ p{line-height:1.65}
             'uk': 'uk-UA', 'uk-UA': 'uk-UA',
             // Vietnamese
             'vi': 'vi-VN', 'vi-VN': 'vi-VN',
-            // Chinese
-            'zh': 'zh-CN', 'zh-CN': 'zh-CN', 'zh-TW': 'zh-TW', 'zh-HK': 'zh-TW'
         };
 
         // ========== Helper Functions ==========
@@ -1842,6 +1778,6 @@ p{line-height:1.65}
             ssid.setAttribute('readonly', '');
         });
     </script>
-<p style="text-align:center">iPhone 热点请打开“最大兼容性”。</p>
+<p style="text-align:center">On an iPhone hotspot, turn on "Maximize Compatibility".</p>
 </body>
 </html>

@@ -1,49 +1,49 @@
 #pragma once
 
-// 小智后台 OTA / 设备激活客户端。
+// Xiaozhi backend OTA / device activation client.
 //
-// 为什么必须要有这一层：官方后台（api.tenclass.net）不会白送一个可用的
-// WebSocket 凭据。设备必须先用 Device-Id/Client-Id 调 OTA 接口，服务端才会返回
+// Why this layer is needed: the official backend (api.tenclass.net) does not hand out a usable
+// WebSocket credential for free. The device must first call the OTA endpoint with Device-Id/Client-Id, and the server then returns
 //
-//   * websocket{url, token, version}  —— 真正的对话地址与令牌
-//   * activation{code, message}       —— 设备还没绑定，要求用户去后台绑定这个 MAC
+//   * websocket{url, token, version}  -- the real conversation address and token
+//   * activation{code, message}       -- the device is not bound yet; asks the user to bind this MAC in the backend
 //
-// 官方固件（xiaozhi-esp32 ota.cc / application.cc）就是这么做的。之前的实现直接
-// 硬编码 wss://api.tenclass.net/xiaozhi/v1/ + "test-token"，跳过整个激活流程，
-// 在官方后台下"连得上但对话没有结果"，根因就在这里。
+// The official firmware (xiaozhi-esp32 ota.cc / application.cc) does exactly this. The earlier implementation hardcoded
+// wss://api.tenclass.net/xiaozhi/v1/ + "test-token", skipping the whole activation flow;
+// on the official backend that gave "connects but the conversation returns nothing", and this was the root cause.
 //
-// 自建服务端（xiaozhi-esp32-server）通常也提供同一个 OTA 路径，因此这套流程对
-// 自建后台同样适用。
+// Self-hosted servers (xiaozhi-esp32-server) usually provide the same OTA path, so this flow
+// also works with a self-hosted backend.
 
 #include <string>
 
 namespace xiaozhi {
 
 enum class OtaResult {
-    Ok,               // 拿到了 websocket 配置
-    NeedsActivation,  // 服务端要求先绑定设备（带激活码）
-    NoConfig,         // 响应正常但没有 websocket 段（用本地 NVS / 默认值继续）
-    NetworkError,     // 请求失败（无网、TLS、超时）
-    ParseError,       // 响应无法解析
+    Ok,               // Got the websocket config
+    NeedsActivation,  // Server requires binding the device first (with an activation code)
+    NoConfig,         // Response OK but no websocket section (continue with local NVS / defaults)
+    NetworkError,     // Request failed (no network, TLS, timeout)
+    ParseError,       // Response could not be parsed
 };
 
 struct OtaOutcome {
     OtaResult result{OtaResult::NetworkError};
     std::string url;                  // websocket url
     std::string token;                // websocket token
-    int version{0};                   // 协议版本（0 = 服务端未指定）
-    std::string activation_code;      // 激活码（NeedsActivation 时）
-    std::string activation_message;   // 服务端给的提示文案
-    std::string detail;               // 诊断信息 / HTTP 状态码
+    int version{0};                   // Protocol version (0 = not specified by server)
+    std::string activation_code;      // Activation code (when NeedsActivation)
+    std::string activation_message;   // Hint text from the server
+    std::string detail;               // Diagnostic info / HTTP status code
 };
 
-// 用 /xiaozhi/ota/ 换配置。若成功会顺带把 url/token/version 写入 NVS 命名空间
-// "websocket"（与官方固件同构），并通过 xiaozhi_store 的 "xiaozhi" 命名空间暴露。
+// Exchange for config via /xiaozhi/ota/. On success also writes url/token/version into the NVS namespace
+// "websocket" (same layout as the official firmware), and exposes them through the "xiaozhi" namespace of xiaozhi_store.
 //
-// 必须在控制任务里调用（内部会做一次带 TLS 的 HTTPS 请求，耗时数百毫秒）。
+// Must be called from the control task (does one HTTPS request with TLS internally, taking hundreds of ms).
 OtaOutcome ota_fetch_config();
 
-// 服务端返回的 HTTP 状态码（诊断用，0 表示没拿到响应）
+// HTTP status code returned by the server (for diagnostics; 0 means no response)
 int ota_last_http_status();
 
 } // namespace xiaozhi

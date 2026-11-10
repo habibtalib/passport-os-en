@@ -11,7 +11,7 @@
 
 static const char *TAG = "home_clock";
 
-#define CLOCK_EPOCH_MIN 1700000000LL /* 2023-11;早于此视为未校时 */
+#define CLOCK_EPOCH_MIN 1700000000LL /* 2023-11; anything earlier counts as unsynced */
 
 static void on_time_sync(struct timeval *tv) {
     if (tv && tv->tv_sec >= CLOCK_EPOCH_MIN) time_sync_set_epoch(tv->tv_sec);
@@ -19,8 +19,8 @@ static void on_time_sync(struct timeval *tv) {
 
 void home_clock_start(void) {
     if (esp_sntp_enabled()) return;
-    // 单服务器(LWIP_SNTP_MAX_SERVERS=1),阿里云节点国内可达性最好;
-    // 解析失败由 SNTP 自身按间隔重试,无需外层重试任务。
+    // Single server (LWIP_SNTP_MAX_SERVERS=1); the Aliyun node has the best reachability in China;
+    // on resolve failure SNTP itself retries at its interval, no outer retry task needed.
     esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "ntp.aliyun.com");
     esp_sntp_set_time_sync_notification_cb(on_time_sync);
@@ -61,11 +61,12 @@ void home_clock_format_date(char *buf, size_t cap) {
     time_t t = time(NULL) + (time_t)time_sync_tz_offset_sec();
     struct tm tm;
     gmtime_r(&t, &tm);
-    snprintf(buf, cap, "%02d月%02d日", tm.tm_mon + 1, tm.tm_mday);
+    static const char *kMon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    snprintf(buf, cap, "%s %02d", kMon[tm.tm_mon % 12], tm.tm_mday);
 }
 
 void home_clock_format_weekday(char *buf, size_t cap) {
-    static const char *kWeek[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+    static const char *kWeek[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     if (!buf || cap < 8) return;
     if (!home_clock_valid()) {
         snprintf(buf, cap, "----");

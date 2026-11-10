@@ -80,13 +80,13 @@ void app_state_reduce(app_state_t *s, const app_event_t *ev, uint64_t now, app_a
             s->link_up && s->pc_ready) {
             out[(*n)++] = (app_action_t){.type = APP_ACT_SEND_KEY_ACTION,
                 .u.key_action.action = APP_KEY_ENTER};
-            snprintf(s->toast, sizeof(s->toast), "已发送回车");
+            snprintf(s->toast, sizeof(s->toast), "Enter sent");
             s->toast_until_ms = now + 1500;
         }
         break;
     case APP_EV_AUDIO_ERROR:
         end_voice(s, now, true, out, n);
-        snprintf(s->toast, sizeof(s->toast), "麦克风异常，请重试");
+        snprintf(s->toast, sizeof(s->toast), "Mic error, retry");
         s->toast_until_ms = now + 4000;
         break;
     case APP_EV_AUDIO_DROP_START: s->net_busy = s->state == APP_ST_LISTENING; break;
@@ -98,7 +98,7 @@ void app_state_reduce(app_state_t *s, const app_event_t *ev, uint64_t now, app_a
         }
         if (s->state == APP_ST_LISTENING && now - s->state_since_ms >= APP_PTT_MAX_TALK_MS) {
             end_voice(s, now, false, out, n);
-            snprintf(s->toast, sizeof(s->toast), "已暂停，请松开上键");
+            snprintf(s->toast, sizeof(s->toast), "Paused, release Up");
             s->toast_until_ms = now + 4000;
         }
         break;
