@@ -50,6 +50,25 @@ python3 tests/test_wifi_internet.py
 "${CXX:-c++}" -std=c++20 -Wall -Wextra -Werror -Wno-unused-variable -Wno-misleading-indentation \
     -fsanitize=address,undefined -g -Itests/pomodoro_mocks -Imain -Imain/fonts \
     tests/test_pomodoro_app.cc "$test_dir/pomodoro-core.o" -o "$test_dir/pomodoro-app"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+    -Itests/vendor/cjson -c tests/vendor/cjson/cJSON.c -o "$test_dir/cjson.o"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -Imain -Itests/vendor/cjson \
+    -c main/apps/clausium/clausium_feed.c -o "$test_dir/clausium-feed.o"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -Imain \
+    tests/test_clausium_feed.c "$test_dir/clausium-feed.o" "$test_dir/cjson.o" -lm -o "$test_dir/clausium-feed"
+"$test_dir/clausium-feed"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+    -Itests/home_mocks -Itests/radio_mocks -Imain \
+    tests/test_clausium_config.c main/apps/clausium/clausium_config.c -o "$test_dir/clausium-config"
+"$test_dir/clausium-config"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+    -Itests/clausium_alert_mocks -Itests/radio_mocks -Imain -Imain/apps/clausium \
+    tests/test_clausium_alert.c "$test_dir/clausium-feed.o" "$test_dir/cjson.o" -lm -o "$test_dir/clausium-alert"
+"$test_dir/clausium-alert"
+"${CXX:-c++}" -std=c++20 -Wall -Wextra -Werror -Wno-unused-variable -Wno-misleading-indentation \
+    -fsanitize=address,undefined -g -Itests/clausium_mocks -Itests/radio_mocks -Imain -Imain/fonts \
+    tests/test_clausium_app.cc "$test_dir/clausium-feed.o" "$test_dir/cjson.o" -lm -o "$test_dir/clausium-app"
+"$test_dir/clausium-app"
 "$test_dir/pomodoro-app"
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -Imain \
     tests/test_wifi_keyboard.cc -o "$test_dir/wifi-keyboard"

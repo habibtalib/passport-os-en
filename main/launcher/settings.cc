@@ -16,6 +16,8 @@
 #include "wifi_manager.h"
 #include "lvgl.h"
 #include "nvs.h"
+#include "apps/clausium/clausium_alert.h"
+#include "apps/clausium/clausium_config.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -31,7 +33,7 @@ constexpr char kNvsNamespace[] = "system_prefs";
 constexpr uint8_t kVolumeStep = 10;
 constexpr uint8_t kBrightness[] = {20, 40, 60, 80, 100};
 constexpr uint16_t kTimeouts[] = {0, 15, 30, 60, 120, 300};
-constexpr size_t kRowCount = 9;
+constexpr size_t kRowCount = 10;
 
 uint8_t s_volume = 80;
 uint8_t s_brightness = 80;
@@ -48,6 +50,7 @@ lv_timer_t *s_battery_timer;
 ui_pixel_battery_t s_battery{};
 lv_obj_t *s_wifi_bars[3] = {nullptr, nullptr, nullptr};
 bool s_reset_pending = false;
+bool s_clausium_alerts = true; // cached from NVS namespace "clausium" on entry
 std::atomic<int64_t> s_outdoor_until_us{0};
 std::atomic<uint8_t> s_outdoor_restore{80};
 
@@ -119,10 +122,12 @@ void refresh_ui() {
     lv_label_set_text(s_values[6], s_reset_pending ? "OK again" : "Reset");
     lv_label_set_text(s_values[7], "Open");
     lv_label_set_text(s_values[8], "View");
+    lv_label_set_text(s_values[9], s_clausium_alerts ? "On" : "Off");
     static const char *hints[kRowCount] = {
         "OK, then Up/Down: volume", "Hold Down: full 2 min",
         "OK: change timeout", "OK: change theme",
-        "Tap feedback", "Wi-Fi, profile & card", "Resets device settings only", "Pick or saved networks", "Network, time, battery"
+        "Tap feedback", "Wi-Fi, profile & card", "Resets device settings only", "Pick or saved networks", "Network, time, battery",
+        "Banner and chime"
     };
     lv_obj_set_flag(s_confirm, LV_OBJ_FLAG_HIDDEN, !s_reset_pending);
     lv_obj_set_flag(s_help, LV_OBJ_FLAG_HIDDEN, s_reset_pending);
@@ -174,7 +179,8 @@ void create_ui() {
     ui_pixel_battery_set(&s_battery, bsp_battery_soc());
 
     static const char *labels[kRowCount] = {
-        "Volume", "Brightness", "Auto Off", "Theme", "Key Sound", "Phone Setup", "Reset", "Wi-Fi", "Network & Time"
+        "Volume", "Brightness", "Auto Off", "Theme", "Key Sound", "Phone Setup", "Reset", "Wi-Fi", "Network & Time",
+        "Clausium Alerts"
     };
     for (size_t i = 0; i < kRowCount; ++i) {
         const int y = 38 + static_cast<int>(i) * 29;
@@ -219,6 +225,7 @@ void settings_init() {
 }
 
 void settings_start() {
+    s_clausium_alerts = clausium_config_alerts_enabled();
     bsp_lvgl_lock(-1);
     s_reset_pending = false;
     s_volume_editing = false;
@@ -327,6 +334,12 @@ void settings_on_key(uint8_t btn, app_btn_event_t event, uint16_t) {
                 return;
             case 8:
                 settings_stop(); network_diagnostics_open(); return;
+            case 9:
+                s_clausium_alerts = !s_clausium_alerts;
+                if (clausium_config_set_alerts(s_clausium_alerts) != ESP_OK)
+                    ESP_LOGW(kTag, "Failed to save Clausium alerts");
+                clausium_alert_reconfigure();
+                break;
         }
         apply_settings();
         save_all();

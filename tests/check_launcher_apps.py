@@ -9,6 +9,7 @@ app_files = [
     'main/apps/game/app_tetris.cc',
     'main/launcher/wifi_setup.cc',
     'main/launcher/settings.cc',
+    'main/apps/clausium/app_clausium.cc',
 ]
 
 from check_fonts import fonts

@@ -6,6 +6,8 @@
 #include <esp_random.h>      // esp_fill_random(): a fresh one-time token each time the upload window opens
 #include "wifi_manager.h"
 #include "passport_muse.h"
+#include "apps/clausium/clausium_alert.h"
+#include "apps/clausium/clausium_config.h"
 #include "ui/ui_palette.h"
 
 #include <cJSON.h>
@@ -237,6 +239,57 @@ static esp_err_t handler_muse_post(httpd_req_t *req) {
     std::memset(body, 0, sizeof(body));
     if (err == ESP_OK) return send_muse_config(req);
     return send_json(req, 400, err == ESP_ERR_INVALID_STATE ? "{\"error\":\"muse_active\"}" : "{\"error\":\"muse_config\"}");
+}
+
+// Clausium: Mac LAN address + feed token. The token is never sent back.
+static esp_err_t send_clausium_config(httpd_req_t *req) {
+    char host[CLAUSIUM_HOST_MAX + 1];
+    uint16_t port = CLAUSIUM_DEFAULT_PORT;
+    bool token_set = false;
+    clausium_config_status(host, sizeof(host), &port, &token_set);
+    cJSON *obj = cJSON_CreateObject();
+    cJSON_AddBoolToObject(obj, "ok", true);
+    cJSON_AddStringToObject(obj, "host", host);
+    cJSON_AddNumberToObject(obj, "port", port);
+    cJSON_AddBoolToObject(obj, "token_set", token_set);
+    char *json = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    if (!json) return send_json(req, 500, "{\"error\":\"no_memory\"}");
+    esp_err_t err = send_json(req, 200, json);
+    cJSON_free(json);
+    return err;
+}
+static esp_err_t handler_clausium_get(httpd_req_t *req) {
+    if (!token_ok(req)) return send_json(req, 401, "{\"error\":\"unauthorized\"}");
+    return send_clausium_config(req);
+}
+static esp_err_t handler_clausium_post(httpd_req_t *req) {
+    if (!token_ok(req)) return send_json(req, 401, "{\"error\":\"unauthorized\"}");
+    char body[256];
+    if (req->content_len <= 0 || req->content_len >= sizeof(body)) return send_json(req, 400, "{\"error\":\"bad size\"}");
+    int received = 0;
+    while (received < req->content_len) {
+        int n = httpd_req_recv(req, body + received, req->content_len - received);
+        if (n <= 0) return send_json(req, 400, "{\"error\":\"recv\"}");
+        received += n;
+    }
+    body[received] = 0;
+    cJSON *obj = cJSON_Parse(body);
+    const cJSON *host = cJSON_GetObjectItemCaseSensitive(obj, "host");
+    const cJSON *port = cJSON_GetObjectItemCaseSensitive(obj, "port");
+    const cJSON *token = cJSON_GetObjectItemCaseSensitive(obj, "token");
+    esp_err_t err = ESP_ERR_INVALID_ARG;
+    if (cJSON_IsString(host) && cJSON_IsNumber(port) && port->valuedouble >= 1 &&
+        port->valuedouble <= 65535 && port->valuedouble == port->valueint &&
+        (!token || cJSON_IsString(token))) {
+        err = clausium_config_save(host->valuestring, (uint16_t)port->valueint,
+                                   token ? token->valuestring : nullptr);
+    }
+    cJSON_Delete(obj);
+    std::memset(body, 0, sizeof(body));
+    if (err != ESP_OK) return send_json(req, 400, "{\"error\":\"clausium_config\"}");
+    clausium_alert_reconfigure();
+    return send_clausium_config(req);
 }
 
 static esp_err_t handler_avatar_get(httpd_req_t *req) {
@@ -564,7 +617,7 @@ esp_err_t home_upload_start(void) {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 6144;
-    config.max_uri_handlers = 17;
+    config.max_uri_handlers = 19;
     // 10 lwIP sockets total: leave room for DNS, SNTP, control/listen sockets,
     // and a new accept before LRU eviction. Phone OS probes also use HTTP.
     config.max_open_sockets = 3;
@@ -596,6 +649,8 @@ esp_err_t home_upload_start(void) {
     const httpd_uri_t finish_uri = {"/api/finish", HTTP_POST, handler_finish, NULL};
     const httpd_uri_t muse_get = {"/api/muse", HTTP_GET, handler_muse_get, NULL};
     const httpd_uri_t muse_post = {"/api/muse", HTTP_POST, handler_muse_post, NULL};
+    const httpd_uri_t clausium_get = {"/api/clausium", HTTP_GET, handler_clausium_get, NULL};
+    const httpd_uri_t clausium_post = {"/api/clausium", HTTP_POST, handler_clausium_post, NULL};
     const httpd_uri_t captive_uri = {"/*", HTTP_GET, handler_captive, NULL};
     // 2026-09-13 fix (B8): registration return values must be checked. Originally all four handlers dropped the return value,
     // so on registration failure the page just returned 404 with not a single trace in the log.
@@ -607,6 +662,7 @@ esp_err_t home_upload_start(void) {
         {&setup_uri, "GET /api/setup"}, {&networks_uri, "GET /api/networks"},
         {&connect_uri, "POST /api/connect"}, {&finish_uri, "POST /api/finish"},
         {&muse_get, "GET /api/muse"}, {&muse_post, "POST /api/muse"},
+        {&clausium_get, "GET /api/clausium"}, {&clausium_post, "POST /api/clausium"},
         {&captive_uri, "captive portal"},
     };
     for (const auto &r : routes) {

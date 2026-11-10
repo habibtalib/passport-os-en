@@ -21,6 +21,9 @@ const passport_app_t *app_registry_get_by_id(passport_app_id_t id);
 // Get the ID of the app currently active in the foreground
 passport_app_id_t app_registry_get_active(void);
 
+// Radio, Xiaozhi and Muse: apps that need a large, clean heap.
+bool app_registry_is_heavy(passport_app_id_t id);
+
 // Called once at boot: if the last boot was a soft reboot to enter a heavy app, return that app ID (otherwise
 // APP_ID_COUNT). The record is cleared after reading.
 passport_app_id_t app_registry_take_clean_launch(void);

@@ -40,6 +40,7 @@ extern const passport_app_t g_stopwatch_app;
 extern const passport_app_t g_sound_jump_app;
 extern const passport_app_t g_muse_app;
 extern const passport_app_t g_pomodoro_app;
+extern const passport_app_t g_clausium_app;
 
 namespace {
 
@@ -57,13 +58,15 @@ const passport_app_t *s_apps[] = {
     &g_tetris_app,
     &g_stopwatch_app,
     &g_pomodoro_app,
+    &g_clausium_app,
     &g_settings_app,   // Settings goes last (the usual closing slot for apps)
 };
 
 constexpr size_t kAppCount = sizeof(s_apps) / sizeof(s_apps[0]);
 bool feedback_allowed(passport_app_id_t id) {
     return id == APP_ID_HOME || id == APP_ID_LAUNCHER || id == APP_ID_SETTINGS ||
-           id == APP_ID_WIFI || id == APP_ID_STOPWATCH || id == APP_ID_POMODORO || id == APP_ID_TETRIS;
+           id == APP_ID_WIFI || id == APP_ID_STOPWATCH || id == APP_ID_POMODORO || id == APP_ID_TETRIS ||
+           id == APP_ID_CLAUSIUM;
 }
 std::atomic<passport_app_id_t> s_active_id{APP_ID_LAUNCHER};
 wake_gate_t s_wake_gate{};
@@ -322,6 +325,10 @@ passport_app_id_t app_registry_take_clean_launch(void) {
         return APP_ID_COUNT;
     s_fresh_heap = true;
     return id;
+}
+
+bool app_registry_is_heavy(passport_app_id_t id) {
+    return heavy_app(id);
 }
 
 passport_app_id_t app_registry_get_active(void) {

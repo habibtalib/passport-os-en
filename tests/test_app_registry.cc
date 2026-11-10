@@ -11,7 +11,8 @@ static void key(uint8_t,app_btn_event_t,uint16_t){++keys;if(key_opens_launcher)a
 static passport_app_t app(passport_app_id_t id){passport_app_t a{};a.id=id;a.name="test";a.start=start;a.stop=stop;a.on_key=key;a.prepare_stop=prepare;return a;}
 const passport_app_t g_radio_app=app(APP_ID_RADIO),g_voice_app=app(APP_ID_VOICE),g_xiaozhi_app=app(APP_ID_XIAOZHI),
  g_wifi_app=app(APP_ID_WIFI),g_settings_app=app(APP_ID_SETTINGS),g_home_app=app(APP_ID_HOME),g_game_app=app(APP_ID_GAME),
- g_tetris_app=app(APP_ID_TETRIS),g_stopwatch_app=app(APP_ID_STOPWATCH),g_sound_jump_app=app(APP_ID_SOUND_JUMP),g_muse_app=app(APP_ID_MUSE),g_pomodoro_app=app(APP_ID_POMODORO);
+ g_tetris_app=app(APP_ID_TETRIS),g_stopwatch_app=app(APP_ID_STOPWATCH),g_sound_jump_app=app(APP_ID_SOUND_JUMP),g_muse_app=app(APP_ID_MUSE),g_pomodoro_app=app(APP_ID_POMODORO),
+ g_clausium_app=app(APP_ID_CLAUSIUM);
 void launcher_ui_show(){start();} void launcher_ui_hide(){stop();}
 void launcher_ui_on_key(uint8_t,app_btn_event_t){++keys;}
 bool wifi_setup_can_leave(){return mock_setup;}
@@ -128,6 +129,8 @@ int main(){
  mock_mutex_available=false;assert(!app_registry_sound_notice());mock_mutex_available=true;
  mock_chime=true;assert(!app_registry_sound_notice());mock_chime=false;
  app_registry_switch_to(APP_ID_RADIO);assert(!app_registry_sound_notice()&&alarm_attempts==1);
+ assert(app_registry_is_heavy(APP_ID_RADIO)&&app_registry_is_heavy(APP_ID_XIAOZHI)&&app_registry_is_heavy(APP_ID_MUSE));
+ assert(!app_registry_is_heavy(APP_ID_CLAUSIUM)&&!app_registry_is_heavy(APP_ID_HOME)&&!app_registry_is_heavy(APP_ID_GAME));
  // Clean launch: heavy apps start in place while the heap fits them, however
  // often they are re-entered; light apps never restart.
  app_registry_switch_to(APP_ID_HOME);assert(mock_restarts==0);

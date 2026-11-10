@@ -22,6 +22,7 @@ let state='idle',saved=false,failShare=false,denyFinish=false,emptyScan=true,fai
 let connectError='';
 let avatarError='',avatarDeviceCode='ESP_FAIL';
 let museTokenSet=false,musePaired=false,museProxyHost='',museProxyPort=0,failMuseSave=false,failMuseLoad=false,museGate=null;
+let clausiumHost='',clausiumPort=8790,clausiumTokenStored='',failClausiumLoad=false;
 let failCities=false,cityGate=null;let savedProfile={name:'Test',signature:'Existing signature',address:'Old address',city:'Custom city',lat:'22.3',lon:'113.6',avatar:true,share_image:true};let gallery=[{slot:0,bytes:12000}],blobBytes=20000,qualityAttempts=[];
 const phoneWindow={__T:314159,scrollTo(){},addEventListener(){},isSecureContext:false,crypto:require('node:crypto').webcrypto,location:{origin:'http://192.168.4.1'}};
 const phoneNavigator={};
@@ -30,6 +31,7 @@ const context=vm.createContext({document:{getElementById:get,createElement:()=>n
  requests.push({url,options});let result={},ok=true;
  if(url.startsWith('/api/cities')){if(cityGate)await cityGate;if(failCities)throw new Error('offline');result=cityCatalog;}
  if(url.startsWith('/api/muse')){if(options.method==='POST'){if(failMuseSave){ok=false;result={error:'muse_config'}}else{const data=JSON.parse(options.body);if(data.sdk_token){museTokenSet=true;musePaired=false}if('proxy_host' in data){museProxyHost=data.proxy_host;museProxyPort=data.proxy_port}result={ok:true,token_set:museTokenSet,paired:musePaired,proxy_host:museProxyHost,proxy_port:museProxyPort}}}else{if(museGate)await museGate;if(failMuseLoad)throw new Error('offline');result={token_set:museTokenSet,paired:musePaired,proxy_host:museProxyHost,proxy_port:museProxyPort}}}
+ if(url.startsWith('/api/clausium')){if(options.method==='POST'){const data=JSON.parse(options.body);clausiumHost=data.host;clausiumPort=data.port;if(data.token)clausiumTokenStored=data.token;if(!data.host)clausiumTokenStored=''}else if(failClausiumLoad)throw new Error('offline');result={ok:true,host:clausiumHost,port:clausiumPort,token_set:!!clausiumTokenStored}}
  if(url.startsWith('/api/profile')&&!options.method)result=savedProfile;
  if(url.startsWith('/api/avatar')&&options.method==='POST'&&avatarError){ok=false;result={error:avatarError,code:avatarDeviceCode};}
  if(url.startsWith('/api/setup'))result={state,saved_network:saved,saved_networks:saved?['Absent Wi-Fi','Test Wi-Fi']:[],ssid:'Test Wi-Fi'};
@@ -343,6 +345,32 @@ const readingTimeout=[...timers.values()].find(t=>t.ms===15000);assert.ok(readin
 readingTimeout.fn();await stalledReading;imageMode='ok';
 assert.match(get('shareStatus').textContent,/Reading the image timed out/);assert.equal(vm.runInContext('cardBusy',context),false);
 assert.ok(html.indexOf('id="shareStatus"')<html.indexOf('id="cardList"'),'picker feedback precedes the gallery');
+// Clausium: read on open, strict validation, token never echoed, keep-token saves.
+assert.ok(html.indexOf('id="clausiumSection"')>html.indexOf('id="museSection"'));
+assert.equal(get('clausiumToken').type,'password');
+const clausiumPosts=()=>posts().filter(r=>r.url.startsWith('/api/clausium'));
+failClausiumLoad=true;get('clausiumSection').open=true;await get('clausiumSection').ontoggle();
+assert.equal(get('retryClausium').hidden,false);assert.match(get('clausiumSaved').textContent,/not read yet/);
+failClausiumLoad=false;await get('retryClausium').onclick();
+assert.equal(get('clausiumState').textContent,'Optional');assert.match(get('clausiumSaved').textContent,/Not set up yet/);
+assert.equal(get('clausiumPort').value,8790);
+for(const [host,port,token] of [['127.0.0.1','8790','ABCDEFGH2345'],['192.168.1.999','8790','ABCDEFGH2345'],['bad_host!','8790','ABCDEFGH2345'],['192.168.1.20','0','ABCDEFGH2345'],['192.168.1.20','8790','ABCDEFGH1890'],['192.168.1.20','8790','SHORT'],['192.168.1.20','8790','']]){
+ get('clausiumHost').value=host;get('clausiumPort').value=port;get('clausiumToken').value=token;await get('saveClausium').onclick();
+ assert.equal(clausiumPosts().length,0,'invalid Clausium input is not posted: '+host+' '+port+' '+token);
+ assert.equal(get('clausiumStatus').dataset.error,'true');
+}
+get('clausiumHost').value=' 192.168.1.20 ';get('clausiumPort').value='';get('clausiumToken').value='abcd-efgh 2345';await get('saveClausium').onclick();
+let clausiumReq=clausiumPosts().at(-1);assert.equal(clausiumReq.url,'/api/clausium?t=314159');
+assert.deepEqual(JSON.parse(clausiumReq.options.body),{host:'192.168.1.20',port:8790,token:'ABCDEFGH2345'});
+assert.equal(get('clausiumToken').value,'');assert.equal(get('clausiumState').textContent,'On');
+assert.match(get('clausiumSaved').textContent,/192\.168\.1\.20:8790 · token saved/);assert.match(get('clausiumToken').placeholder,/Saved/);
+get('clausiumHost').value='my-mac.local';get('clausiumPort').value='9000';await get('saveClausium').onclick();
+assert.deepEqual(JSON.parse(clausiumPosts().at(-1).options.body),{host:'my-mac.local',port:9000},'saved token is kept, never re-sent');
+assert.equal(clausiumTokenStored,'ABCDEFGH2345');
+get('clausiumHost').value='';await get('saveClausium').onclick();
+assert.deepEqual(JSON.parse(clausiumPosts().at(-1).options.body),{host:'',port:9000});assert.match(get('clausiumStatus').textContent,/turned off/);
+assert.equal(get('clausiumState').textContent,'Optional');
+console.log('Clausium phone setup: lazy read/retry, host/port/token validation, token normalisation, keep-token save, never echoed, clear to disable: PASS');
 console.log('Image feedback: filename preservation, distinct decode/encode stages, encoding timeout/retry/late callback, MIME/null/exception recovery: PASS');
 console.log('Multiselect: unfiltered multiple file input, multiple photo alternative, separate single replacement, cancelled replacement isolation and non-image rejection: PASS');
  console.log('Card gallery: six-image limit, sequential compression, released original bitmaps, quality ladder, reject oversized, stable slots, reorder/delete and partial-save retry: PASS');

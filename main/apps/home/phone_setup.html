@@ -15,7 +15,7 @@ h1{font-size:30px;line-height:1.3;letter-spacing:-.025em;font-weight:650;margin:
 input[type=text],input[type=password],select,textarea{width:100%;border:1px solid #9ca99b;border-radius:var(--radius);padding:13px 14px;min-height:50px;background:#fffef9;color:var(--ink);font:inherit;line-height:1.5}textarea{resize:vertical}input::placeholder,textarea::placeholder{color:#677268}select{text-overflow:ellipsis;padding-right:32px}button{font:inherit;cursor:pointer;touch-action:manipulation}button:disabled{cursor:wait;opacity:.6}.primary,.secondary{width:100%;min-height:52px;padding:12px 18px;border:0;border-radius:var(--radius);font-weight:600}.primary{background:var(--green);color:white}.primary:hover{background:#16482f}.secondary{background:var(--tint);color:var(--ink);margin-top:12px}.text-button{background:none;border:0;color:var(--green);padding:10px 0;text-decoration:underline;text-underline-offset:4px;min-height:44px;font-size:14px}.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.row label{margin:0}.password{position:relative}.password input{padding-right:70px}.password button{position:absolute;right:8px;top:4px;min-width:52px;height:44px;color:var(--green);background:none;border:0;font-size:14px}.status{font-size:14px;line-height:1.6;margin:16px 0;overflow-wrap:anywhere}.status:empty{display:none}.status[data-error=true]{color:var(--error)}.note{padding:16px 0;border-top:1px solid var(--line);color:var(--muted);font-size:13px;margin-top:26px}.actions{margin-top:30px}.connection{display:flex;align-items:center;gap:8px;color:var(--green);font-size:14px;margin-bottom:24px;overflow-wrap:anywhere}.connection svg{width:18px;height:18px;flex:none}.connection span{min-width:0;overflow-wrap:anywhere}
 details{border-top:1px solid var(--line);padding:20px 0}summary{cursor:pointer;font-size:16px;font-weight:600;min-height:30px}summary small{font-size:12px;font-weight:400;color:var(--muted);margin-left:6px}.detail-body{padding-top:18px}.file-pick{display:block;padding:15px 16px;border:1px dashed #80977f;border-radius:var(--radius);font-size:14px;font-weight:400;cursor:pointer}.file-pick input{display:block;width:100%;margin-top:12px;font-size:14px}input::file-selector-button{border:0;background:var(--tint);color:var(--ink);padding:8px 12px;border-radius:6px;margin-right:10px}.photo-tools{margin-top:18px}.crop-layout{display:flex;align-items:center;justify-content:center;gap:22px;flex-wrap:wrap}#vp{position:relative;width:192px;height:300px;overflow:hidden;background:#dde5d7;touch-action:none}#pv{position:absolute;pointer-events:none;user-select:none;max-width:none}#binc{width:96px;height:150px;background:#07170f;image-rendering:pixelated}.caption{text-align:center;font-size:12px;color:var(--muted);margin:8px 0 0}#zm{width:100%;min-height:40px}#sharec{display:block;width:180px;height:240px;margin:20px auto 0;background:white}.saved{font-size:13px;color:var(--muted);margin:8px 0 18px}.success-mark{width:60px;height:60px;color:var(--green);margin:6px 0 24px}.complete{padding-top:12px}.complete p{color:var(--muted)}.recap{margin:30px 0;padding:18px 0;border-block:1px solid var(--line);font-size:15px}.recap strong{display:block;font-size:20px;font-weight:600;overflow-wrap:anywhere}.subtle{font-size:12px;color:var(--muted);margin-top:30px;text-align:center}.empty-networks{margin:12px 0;color:var(--muted);font-size:13px}
 .file-pick label{font-weight:600;margin:0 0 10px}.file-pick input,.picker-help input{width:100%;min-height:48px;font-size:16px;cursor:pointer}input::file-selector-button{min-height:44px}.picker-help{padding:12px 0;margin-top:10px}.picker-help summary{font-size:14px;color:var(--green)}
-#museProxyHost,#museProxyPort{width:100%;min-height:50px;padding:13px 14px;border:1px solid #9ca99b;border-radius:var(--radius);background:#fffef9;color:var(--ink);font:inherit;line-height:1.5}#museSection label{margin-top:16px}
+#museProxyHost,#museProxyPort,#clausiumHost,#clausiumPort,#clausiumToken{width:100%;min-height:50px;padding:13px 14px;border:1px solid #9ca99b;border-radius:var(--radius);background:#fffef9;color:var(--ink);font:inherit;line-height:1.5}#museSection label,#clausiumSection label{margin-top:16px}
 @media(min-width:760px){.shell{margin:40px auto;padding:32px 40px;border:1px solid var(--line);border-radius:20px;background:#fbfaf5}.brand{margin-bottom:4px}h1{font-size:34px}}
 @media(max-width:360px){.shell{padding:20px 18px}h1{font-size:28px}.brand small{font-size:11px}.steps{margin-top:24px}.crop-layout{gap:12px}}
 @media(prefers-reduced-motion:no-preference){.primary,.secondary{transition:background .15s ease-out}}
@@ -86,6 +86,15 @@ details{border-top:1px solid var(--line);padding:20px 0}summary{cursor:pointer;f
 <p class="help">Use only your own Token and never share it. Changing the Token requires pairing again. Configured over the device hotspot; the page never shows the saved key.</p>
 <button id="useSavedMuse" type="button" class="secondary" hidden>Use saved settings</button><button id="retryMuse" type="button" class="text-button" hidden>Reload settings</button>
 <button id="saveMuse" type="button" class="secondary" disabled>Save Muse settings</button><p class="help">The Token and PC proxy settings are stored on this device and survive restarts. You can also save them together with "Save and finish" below.</p><p id="museStatus" class="status" role="status" aria-live="polite"></p></div></details>
+<details id="clausiumSection"><summary>Clausium (Claude sessions)<small id="clausiumState">Optional</small></summary><div class="detail-body">
+<p class="help">Shows which Claude Code sessions need you, from the Clausium app on your Mac, and chimes when one does. On the Mac open Clausium Settings &gt; Devices &gt; Passport, turn it on, then copy the address and token here. The Mac and the device must be on the same Wi-Fi.</p>
+<p id="clausiumSaved" class="saved" role="status">Open this section to read the saved settings.</p>
+<label for="clausiumHost">Mac address</label><input id="clausiumHost" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="63" placeholder="e.g. 192.168.1.20 or my-mac.local">
+<label for="clausiumPort">Port</label><input id="clausiumPort" type="number" min="1" max="65535" inputmode="numeric" placeholder="8790">
+<label for="clausiumToken">Token</label><input id="clausiumToken" type="password" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="14" placeholder="12 characters">
+<p class="help">Clear the address and save to turn Clausium off. The page never shows the saved token. Sound alerts can be turned off in Settings &gt; Clausium Alerts.</p>
+<button id="retryClausium" type="button" class="text-button" hidden>Reload settings</button>
+<button id="saveClausium" type="button" class="secondary">Save Clausium settings</button><p id="clausiumStatus" class="status" role="status" aria-live="polite"></p></div></details>
 <div id="saveStatus" class="status" role="status" aria-live="polite"></div>
 <div class="actions"><button id="save" class="primary" type="button">Save and finish</button><button id="back" class="text-button" type="button">Back to network setup</button></div>
 </section>
@@ -243,6 +252,53 @@ function loadMuse(restore=false){
  lockMuse();return museLoading;
 }
 $('retryMuse').onclick=()=>loadMuse();$('useSavedMuse').onclick=()=>loadMuse(true);
+let clausiumTokenSet=false,clausiumLoaded=false,clausiumSaving=false,clausiumLoading=null,savedClausiumHost='',savedClausiumPort=8790;
+function lockClausium(){for(const id of ['saveClausium','retryClausium','clausiumHost','clausiumPort','clausiumToken'])$(id).disabled=clausiumSaving||!!clausiumLoading}
+function applyClausium(c){
+ if(typeof c.host!=='string'||!Number.isInteger(c.port)||typeof c.token_set!=='boolean')throw new Error('invalid Clausium configuration');
+ clausiumTokenSet=c.token_set;savedClausiumHost=c.host;savedClausiumPort=c.port;clausiumLoaded=true;
+ const on=!!c.host&&c.token_set;$('clausiumState').textContent=on?'On':'Optional';
+ $('clausiumSaved').textContent=on?'Mac '+c.host+':'+c.port+' · token saved':'Not set up yet';
+ $('clausiumToken').placeholder=c.token_set?'Saved; leave empty to keep':'12 characters';
+ $('clausiumHost').value=c.host;$('clausiumPort').value=c.port;$('retryClausium').hidden=true;
+}
+function clausiumInput(){const host=$('clausiumHost').value.trim(),portText=String($('clausiumPort').value).trim();return {host,port:portText?Number(portText):8790,token:$('clausiumToken').value.replace(/[\s-]/g,'').toUpperCase()}}
+function pendingClausium(){const c=clausiumInput();return !!c.token||(clausiumLoaded&&(c.host!==savedClausiumHost||(!!c.host&&c.port!==savedClausiumPort)))||(!clausiumLoaded&&!!c.host)}
+function validClausiumHost(h){
+ if(/^[0-9.]+$/.test(h)){const p=h.split('.');return p.length===4&&p.every(n=>/^\d{1,3}$/.test(n)&&Number(n)<=255)&&Number(p[0])>=1&&Number(p[0])<=223&&Number(p[0])!==127}
+ return h.length<=63&&h.split('.').every(l=>/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(l));
+}
+async function saveClausiumConfig(onlyPending=false){
+ if(clausiumSaving)throw new Error('Clausium settings are being saved, wait a moment.');
+ if(onlyPending&&!pendingClausium())return;
+ if(clausiumLoading)await clausiumLoading;
+ if(!clausiumLoaded&&!await loadClausium())throw new Error('Reload the saved Clausium settings first, then save.');
+ const c=clausiumInput();
+ if(c.host&&!validClausiumHost(c.host))throw new Error('Enter the Mac IPv4 address or host name, e.g. 192.168.1.20.');
+ if(!Number.isInteger(c.port)||c.port<1||c.port>65535)throw new Error('Enter a port from 1 to 65535.');
+ if(c.token&&!/^[A-Z2-7]{12}$/.test(c.token))throw new Error('The token is 12 characters (letters and 2-7), as shown in Clausium.');
+ if(c.host&&!c.token&&!clausiumTokenSet)throw new Error('Enter the token from Clausium the first time.');
+ clausiumSaving=true;lockClausium();
+ try{
+  const body={host:c.host,port:c.port};if(c.token)body.token=c.token;
+  applyClausium(await api('/api/clausium',body));$('clausiumToken').value='';
+  say('clausiumStatus',c.host?'Saved. Open Clausium on the device.':'Clausium turned off.');
+ }finally{clausiumSaving=false;lockClausium()}
+}
+$('saveClausium').onclick=async()=>{try{await saveClausiumConfig()}catch(e){say('clausiumStatus',e.message,true)}};
+function loadClausium(){
+ if(clausiumSaving)return Promise.resolve(false);
+ if(clausiumLoading)return clausiumLoading;
+ clausiumLoading=(async()=>{try{
+  applyClausium(await api('/api/clausium'));say('clausiumStatus','');return true;
+ }catch(e){
+  if(!clausiumLoaded){$('clausiumState').textContent='To be read';$('clausiumSaved').textContent='Device settings not read yet, retry.'}
+  $('retryClausium').hidden=false;say('clausiumStatus','Read failed; settings saved on the device are kept. Please reload.',true);return false;
+ }finally{clausiumLoading=null;lockClausium()}})();
+ lockClausium();return clausiumLoading;
+}
+$('retryClausium').onclick=()=>loadClausium();
+$('clausiumSection').ontoggle=()=>{if($('clausiumSection').open&&!clausiumLoaded)return loadClausium()};
 $('museSection').ontoggle=()=>{if($('museSection').open&&!museLoaded)return loadMuse()};
 
 // Portrait cropping happens on the phone, preserving the device's small memory budget.
@@ -379,7 +435,7 @@ async function shareBlob(){
  }
  throw new Error('The card image is too complex and is still large after compression. Try another image.');
 }
-async function save(){if(imageLoading||cardBusy){say('saveStatus','Images are still loading, please wait.',true);return}if(!verified&&!hasSaved){step(1);say('networkStatus','Connect to Wi-Fi first.',true);return}let selected;try{selected=selectedCityProfile()}catch(e){say('saveStatus',e.message,true);return}const profile={name:$('name').value,signature:$('sig').value,address:$('address').value,...selected};for(const [key,max] of [['name',31],['signature',95],['address',127],['city',47],['region',31],['radio_city',47],['lat',15],['lon',15]])if(bytes(profile[key])>max){say('saveStatus','One field is too long, shorten it before saving.',true);return}$('save').disabled=true;$('back').disabled=true;try{renderCards();if(pendingMuseConfig()){say('saveStatus','Saving Muse settings…');await saveMuseConfig(true)}say('saveStatus','Saving profile…');await api('/api/profile',profile);if(portrait){say('saveStatus','Saving portrait…');await api('/api/avatar',portraitPacked())}await saveCards();say('saveStatus','Finishing setup…');await api('/api/finish',{});$('doneName').textContent=profile.name||'AI Passport';$('doneSummary').textContent='Profile'+(portrait?', portrait':'')+(cards.length?', '+cards.length+' color cards':'')+' saved';step(3)}catch(e){say('saveStatus',e.message+' Unfinished items can be saved again.',true)}finally{$('save').disabled=false;$('back').disabled=false;renderCards()}}
+async function save(){if(imageLoading||cardBusy){say('saveStatus','Images are still loading, please wait.',true);return}if(!verified&&!hasSaved){step(1);say('networkStatus','Connect to Wi-Fi first.',true);return}let selected;try{selected=selectedCityProfile()}catch(e){say('saveStatus',e.message,true);return}const profile={name:$('name').value,signature:$('sig').value,address:$('address').value,...selected};for(const [key,max] of [['name',31],['signature',95],['address',127],['city',47],['region',31],['radio_city',47],['lat',15],['lon',15]])if(bytes(profile[key])>max){say('saveStatus','One field is too long, shorten it before saving.',true);return}$('save').disabled=true;$('back').disabled=true;try{renderCards();if(pendingMuseConfig()){say('saveStatus','Saving Muse settings…');await saveMuseConfig(true)}if(pendingClausium()){say('saveStatus','Saving Clausium settings…');await saveClausiumConfig(true)}say('saveStatus','Saving profile…');await api('/api/profile',profile);if(portrait){say('saveStatus','Saving portrait…');await api('/api/avatar',portraitPacked())}await saveCards();say('saveStatus','Finishing setup…');await api('/api/finish',{});$('doneName').textContent=profile.name||'AI Passport';$('doneSummary').textContent='Profile'+(portrait?', portrait':'')+(cards.length?', '+cards.length+' color cards':'')+' saved';step(3)}catch(e){say('saveStatus',e.message+' Unfinished items can be saved again.',true)}finally{$('save').disabled=false;$('back').disabled=false;renderCards()}}
 $('save').onclick=()=>{cancelLocation();return save()};
 async function load(){try{const [profile,state]=await Promise.all([api('/api/profile'),api('/api/setup')]);await loadCities();for(const [id,key] of [['name','name'],['sig','signature'],['address','address']])$(id).value=profile[key]||'';if(Array.isArray(profile.portrait_palette)&&profile.portrait_palette.length===4)portraitPalette=profile.portrait_palette;if(Array.isArray(profile.portrait_subject_palette)&&profile.portrait_subject_palette.length===4)portraitSubjectPalette=profile.portrait_subject_palette;previewPortrait();restoreCity(profile);$('avatarState').textContent=profile.avatar?'Set, can replace':'Can upload later';await loadCards();hasSaved=state.saved_network;$('reuse').hidden=!hasSaved;$('keepSaved').hidden=!hasSaved;$('savedField').hidden=!hasSaved;const selected=$('savedNetwork').value;$('savedNetwork').replaceChildren(new Option('Auto-pick a nearby saved network',''));for(const name of state.saved_networks||[])$('savedNetwork').add(new Option(name,name));if((state.saved_networks||[]).includes(selected))$('savedNetwork').value=selected;$('connect').disabled=false;say('networkStatus','');if(state.finishing){step(3);return}if(state.state==='connected')networkReady('Connected '+state.ssid);else if(state.state==='connecting'){lockNetwork(true);polls=0;pollTimer=setTimeout(poll,1000)}await scan()}catch(e){say('networkStatus','Cannot read the device. Make sure the phone is on the device hotspot, then refresh the page.',true)}}
 load().finally(()=>loadMuse());

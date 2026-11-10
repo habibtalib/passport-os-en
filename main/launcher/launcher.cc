@@ -250,6 +250,17 @@ void draw_app_icon(passport_app_id_t id, uint32_t color) {
             set_part(8, 46, 46, 12, 4, color);
             set_part(9, 42, 60, 4, 4, color);
             break;
+        case APP_ID_CLAUSIUM:
+            // Control desk: monitor with a bracketed prompt, a waiting dot and a stand.
+            set_frame(0, 10, 12, 68, 48, color, 4);
+            set_part(1, 20, 24, 4, 16, color);    // "<" bracket
+            set_part(2, 24, 22, 4, 4, color);
+            set_part(3, 24, 38, 4, 4, color);
+            set_part(4, 32, 30, 20, 4, color);    // prompt line
+            set_part(5, 58, 22, 10, 10, ui_theme_is_multicolor() ? UI_WARNING : color); // needs-you dot
+            set_part(6, 40, 60, 8, 8, color);     // neck
+            set_part(7, 24, 68, 40, 6, color);    // base
+            break;
         case APP_ID_TETRIS:
             // Tetris: T/L/square blocks staggered
             set_frame(0, 12, 14, 30, 10, color, 3);   // T bar
@@ -280,7 +291,7 @@ void update_card_content() {
     if (ui_theme_is_multicolor()) {
         switch (app->id) {
             case APP_ID_RADIO: case APP_ID_GAME: case APP_ID_POMODORO: color = UI_TERTIARY; break;
-            case APP_ID_VOICE: case APP_ID_TETRIS: color = UI_SECONDARY; break;
+            case APP_ID_VOICE: case APP_ID_TETRIS: case APP_ID_CLAUSIUM: color = UI_SECONDARY; break;
             case APP_ID_XIAOZHI: case APP_ID_STOPWATCH: color = UI_SUCCESS; break;
             default: break;
         }

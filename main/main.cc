@@ -19,6 +19,7 @@
 #include "bsp_i2c.h"
 #include "ui/ui_capture.h"
 #include "apps/pomodoro/app_pomodoro.h"
+#include "apps/clausium/clausium_alert.h"
 #include "esp_log.h"
 #include "passport_muse.h"
 #include "esp_timer.h"
@@ -226,6 +227,7 @@ static void system_monitor_task(void *arg) {
         settings_tick();
         app_registry_tick();
         pomodoro_service_tick();
+        clausium_alert_service_tick();
         if (app_registry_get_active() == APP_ID_LAUNCHER && app_registry_screen_is_on()) {
             bsp_lvgl_lock(-1);
             if (app_registry_screen_is_on()) launcher_ui_update_status();
@@ -420,6 +422,11 @@ extern "C" void app_main(void) {
         wifi_setup_require_initial();
         app_registry_switch_to(APP_ID_WIFI);
     }
+
+    // Clausium background alerts: a small poller task, only when configured.
+    // After a clean-launch reboot into a heavy app the task waits until that
+    // app exits, so its stack never comes out of the freshly defragmented heap.
+    clausium_alert_init(clean_target != APP_ID_COUNT && app_registry_is_heavy(clean_target));
 
     boot_splash_end();
     // Reserve the codec before accepting keys; a fast first app cannot have
